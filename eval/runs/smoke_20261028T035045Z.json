@@ -1,0 +1,301 @@
+{
+  "created_at": "20261028T035045Z",
+  "model": "muse-wonder-1.0",
+  "usage": {
+    "prompt_tokens": 2344,
+    "completion_tokens": 7767,
+    "cached_tokens": 0
+  },
+  "response": {
+    "findings": [
+      {
+        "confidence": "high",
+        "csf_category": "PR.DS",
+        "csf_function": "PR",
+        "deal_impact": "Severity retained at baseline (high). Unenforced DMARC increases spoofing, business email compromise and wire-fraud risk around transaction communications.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "dns_query",
+            "collector": "email_auth",
+            "evidence_id": "E-001",
+            "excerpt": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example",
+            "locator": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-001",
+        "remediation": {
+          "cost_high_usd": 15000,
+          "cost_low_usd": 5000,
+          "effort_weeks": 2,
+          "summary": "Review DMARC reports, then progress policy from p=none to quarantine and reject after validating legitimate senders."
+        },
+        "rule_id": "EMAIL-DMARC-NONE",
+        "severity": "high",
+        "source": "outside_in",
+        "title": "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "PR.DS",
+        "csf_function": "PR",
+        "deal_impact": "Severity retained at baseline (medium). Softfail weakens protection against unauthorized senders using the domain.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "dns_query",
+            "collector": "email_auth",
+            "evidence_id": "E-002",
+            "excerpt": "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all",
+            "locator": "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-002",
+        "remediation": {
+          "cost_high_usd": 10000,
+          "cost_low_usd": 3000,
+          "effort_weeks": 1,
+          "summary": "Inventory authorized senders and change the SPF qualifier from ~all to -all once legitimate sources are confirmed."
+        },
+        "rule_id": "EMAIL-SPF-SOFT",
+        "severity": "medium",
+        "source": "outside_in",
+        "title": "SPF uses soft/neutral fail"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "PR.PS",
+        "csf_function": "PR",
+        "deal_impact": "Severity retained at baseline (low). Missing DNSSEC reduces DNS integrity protection but is not by itself evidence of compromise.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "dns_query",
+            "collector": "check_dnssec",
+            "evidence_id": "E-003",
+            "excerpt": "dnssec.enabled=false",
+            "locator": "brightwaterfleet.example",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-003",
+        "remediation": {
+          "cost_high_usd": 8000,
+          "cost_low_usd": 2000,
+          "effort_weeks": 1,
+          "summary": "Enable DNSSEC with the DNS provider or registrar and verify DS records and resolution after signing."
+        },
+        "rule_id": "DNS-NO-DNSSEC",
+        "severity": "low",
+        "source": "outside_in",
+        "title": "DNSSEC not enabled"
+      },
+      {
+        "confidence": "medium",
+        "csf_category": "ID.AM",
+        "csf_function": "ID",
+        "deal_impact": "Severity retained at baseline (medium). Public exposure of VPN, automation, staging and legacy names increases attack-surface and diligence risk; the CT evidence does not establish that each host is currently reachable or vulnerable.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "ct_log_query",
+            "collector": "enumerate_ct_subdomains",
+            "evidence_id": "E-004",
+            "excerpt": "pattern=vpn; first_seen=2023-02-11; last_seen=2026-09-30",
+            "locator": "vpn.brightwaterfleet.example",
+            "source_type": "outside_in"
+          },
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "ct_log_query",
+            "collector": "enumerate_ct_subdomains",
+            "evidence_id": "E-005",
+            "excerpt": "pattern=jenkins|old; first_seen=2021-06-03; last_seen=2026-08-14",
+            "locator": "jenkins-old.brightwaterfleet.example",
+            "source_type": "outside_in"
+          },
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "ct_log_query",
+            "collector": "enumerate_ct_subdomains",
+            "evidence_id": "E-006",
+            "excerpt": "pattern=staging; first_seen=2024-01-20; last_seen=2026-10-01",
+            "locator": "staging-api.brightwaterfleet.example",
+            "source_type": "outside_in"
+          },
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "ct_log_query",
+            "collector": "enumerate_ct_subdomains",
+            "evidence_id": "E-007",
+            "excerpt": "pattern=legacy; first_seen=2019-11-05; last_seen=2026-07-22",
+            "locator": "legacy-portal.brightwaterfleet.example",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-004",
+        "remediation": {
+          "cost_high_usd": 30000,
+          "cost_low_usd": 10000,
+          "effort_weeks": 3,
+          "summary": "Validate ownership and current reachability, restrict administrative and staging access, and remove or decommission obsolete systems."
+        },
+        "rule_id": "SURFACE-RISKY-HOSTS",
+        "severity": "medium",
+        "source": "outside_in",
+        "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "ID.AM",
+        "csf_function": "ID",
+        "deal_impact": "Severity retained at baseline (low). A broad certificate footprint increases the likelihood of unmanaged assets and incomplete attack-surface inventories.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "ct_log_query",
+            "collector": "enumerate_ct_subdomains",
+            "evidence_id": "E-008",
+            "excerpt": "unique_hostnames=47; risky_hostnames_count=4",
+            "locator": "brightwaterfleet.example",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-005",
+        "remediation": {
+          "cost_high_usd": 20000,
+          "cost_low_usd": 7500,
+          "effort_weeks": 2,
+          "summary": "Reconcile all 47 CT hostnames against the authoritative asset inventory and retire or formally risk-accept unmanaged systems."
+        },
+        "rule_id": "SURFACE-SPRAWL",
+        "severity": "low",
+        "source": "outside_in",
+        "title": "Large certificate footprint relative to company size"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "PR.DS",
+        "csf_function": "PR",
+        "deal_impact": "Severity retained at baseline (medium). Deprecated TLS on www increases protocol-security and customer or regulatory compliance risk.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "single_https_get",
+            "collector": "check_web_posture",
+            "evidence_id": "E-009",
+            "excerpt": "tls_versions=[TLSv1.0, TLSv1.1, TLSv1.2]",
+            "locator": "www.brightwaterfleet.example TLSv1.0, TLSv1.1",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-006",
+        "remediation": {
+          "cost_high_usd": 12000,
+          "cost_low_usd": 4000,
+          "effort_weeks": 1,
+          "summary": "Disable TLS 1.0 and TLS 1.1 on www.brightwaterfleet.example and confirm remaining clients can use TLS 1.2 or higher."
+        },
+        "rule_id": "WEB-LEGACY-TLS",
+        "severity": "medium",
+        "source": "outside_in",
+        "title": "Deprecated TLS versions offered"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "PR.DS",
+        "csf_function": "PR",
+        "deal_impact": "Severity retained at baseline (low). Missing HSTS permits potential protocol-downgrade exposure for web users.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "single_https_get",
+            "collector": "check_web_posture",
+            "evidence_id": "E-010",
+            "excerpt": "strict-transport-security=null",
+            "locator": "brightwaterfleet.example header: strict-transport-security",
+            "source_type": "outside_in"
+          },
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "single_https_get",
+            "collector": "check_web_posture",
+            "evidence_id": "E-011",
+            "excerpt": "strict-transport-security=null",
+            "locator": "www.brightwaterfleet.example header: strict-transport-security",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-007",
+        "remediation": {
+          "cost_high_usd": 6000,
+          "cost_low_usd": 1500,
+          "effort_weeks": 1,
+          "summary": "Deploy a Strict-Transport-Security header on both hosts after confirming all subresources and redirects operate over HTTPS."
+        },
+        "rule_id": "WEB-NO-HSTS",
+        "severity": "low",
+        "source": "outside_in",
+        "title": "HSTS not set"
+      },
+      {
+        "confidence": "medium",
+        "csf_category": "ID.RA",
+        "csf_function": "ID",
+        "deal_impact": "Severity retained at baseline (critical). This is a potential exposure only: the match is based on a version string from a public page and was not verified on the host, so urgent validation is a pre-close diligence priority rather than a confirmed exploitable condition.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "offline_lookup",
+            "collector": "match_known_exploited",
+            "evidence_id": "E-012",
+            "excerpt": "ExampleGate SSL-VPN 7.0.11 matched CVE-PLACEHOLDER-0001; basis=version string from public page; not verified on host",
+            "locator": "ExampleGate SSL-VPN 7.0.11 (CVE-PLACEHOLDER-0001)",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-008",
+        "remediation": {
+          "cost_high_usd": 40000,
+          "cost_low_usd": 10000,
+          "effort_weeks": 2,
+          "summary": "Immediately confirm whether ExampleGate SSL-VPN 7.0.11 is deployed and reachable, then patch, upgrade, restrict access or remove it if the potential exposure is confirmed."
+        },
+        "rule_id": "KEV-POTENTIAL",
+        "severity": "critical",
+        "source": "outside_in",
+        "title": "Potential exposure to a CISA Known Exploited Vulnerability"
+      },
+      {
+        "confidence": "high",
+        "csf_category": "RS.MA",
+        "csf_function": "RS",
+        "deal_impact": "Severity retained at baseline (high). A breach notice disclosed 14 months before collection creates follow-up diligence, regulatory, customer-notification and incident-response maturity risk.",
+        "evidence": [
+          {
+            "collected_at": "2026-10-28T16:00:00Z",
+            "collection_method": "search_grounding",
+            "collector": "search_public_incidents",
+            "evidence_id": "E-013",
+            "excerpt": "2025-08-14 state AG breach notice: unauthorized access to a customer support system; approx. 3,100 individuals notified",
+            "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+            "source_type": "public_record"
+          }
+        ],
+        "finding_id": "F-009",
+        "remediation": {
+          "cost_high_usd": 50000,
+          "cost_low_usd": 15000,
+          "effort_weeks": 4,
+          "summary": "Obtain the incident report and closure evidence, verify corrective actions and any outstanding obligations, and assess residual customer and regulatory exposure."
+        },
+        "rule_id": "PUB-INCIDENT-RECENT",
+        "severity": "high",
+        "source": "outside_in",
+        "title": "Publicly disclosed security incident in the last 24 months"
+      }
+    ]
+  }
+}

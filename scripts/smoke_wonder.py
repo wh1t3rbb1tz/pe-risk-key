@@ -1,9 +1,9 @@
 """Wonder smoke test: fixture signals -> schema-valid findings.
 
 Loads the Brightwater outside-in fixture, asks Muse Wonder for findings
-constrained to the finding schema, strips strict nulls, validates each
-finding against the original subschema, and scores rule_id recall against
-fixtures/expected/brightwaterfleet.example.yaml.
+constrained to the finding schema, applies deterministic rule constraints,
+strips strict nulls, validates each finding against the original subschema,
+and scores rule_id recall against fixtures/expected/brightwaterfleet.example.yaml.
 
 Makes a live API call; run manually, not from the test suite.
 """
@@ -16,6 +16,7 @@ from typing import Any
 import jsonschema
 import yaml
 
+from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.providers import ModelClient
 from pe_risk_key.schemas import (
     strict_subschema,
@@ -60,13 +61,12 @@ def load_inputs() -> tuple[dict, dict, dict]:
 
 
 def expected_outside_in(expected: dict) -> list[dict]:
-    """Expected findings listed before the SOC 2 section."""
-    entries = []
-    for entry in expected["expected_findings"]:
-        if entry["rule_id"].startswith("SOC2"):
-            break
-        entries.append(entry)
-    return entries
+    """Expected findings with source outside_in."""
+    return [
+        entry
+        for entry in expected["expected_findings"]
+        if entry.get("source") == "outside_in"
+    ]
 
 
 def build_messages(fixture: dict, scoring: dict) -> list[dict]:
@@ -154,6 +154,7 @@ def estimate_cost(usage: dict[str, int]) -> float:
 def print_report(
     results: list[dict],
     summary: dict,
+    adjustments: list[dict],
     usage: dict[str, int],
     model: str,
     domain: str,
@@ -183,6 +184,15 @@ def print_report(
         print(line)
         for err in r["errors"][:3]:
             print(f"    {err}")
+    print(f"\nengine adjustments ({len(adjustments)}):")
+    if adjustments:
+        for a in adjustments:
+            print(
+                f"  {a['finding_id']} {a['field']}: "
+                f"{a['from']} -> {a['to']} ({a['reason']})"
+            )
+    else:
+        print("  -")
     total = len(summary["expected_ids"])
     print(
         f"\nrecall (valid findings): {len(summary['matched'])}/{total} = "
@@ -215,7 +225,9 @@ def main() -> int:
     except (jsonschema.ValidationError, ValueError) as exc:
         print(f"FATAL: structured output failed validation twice: {exc}")
         return 1
-    findings = parsed.get("findings", [])
+    findings, adjustments = apply_rule_constraints(
+        parsed.get("findings", []), scoring
+    )
     results = validate_findings(findings)
     summary = score(results, expected_entries, must_not_find)
 
@@ -238,6 +250,7 @@ def main() -> int:
     print_report(
         results,
         summary,
+        adjustments,
         client.total_usage,
         client.model,
         fixture["target"]["domain"],

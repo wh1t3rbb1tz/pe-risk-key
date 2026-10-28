@@ -88,8 +88,13 @@ def tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
-def run(tool_name: str, domain: str) -> dict:
-    """Run one collector live, or from fixtures when ``DEMO_MODE=1``."""
+def run(tool_name: str, domain: str, **kwargs: Any) -> dict:
+    """Run one collector live, or from fixtures when ``DEMO_MODE=1``.
+
+    Extra keyword arguments pass through to ``collect`` (e.g. the
+    orchestrator chaining fingerprints into ``match_known_exploited``);
+    they are ignored on the fixture path.
+    """
     if tool_name not in _REGISTRY:
         raise KeyError(
             f"Unknown tool: {tool_name!r}. Known: {sorted(_REGISTRY)}."
@@ -102,4 +107,4 @@ def run(tool_name: str, domain: str) -> dict:
         )
         return data[tool_name]
     begin_run(domain)
-    return _REGISTRY[tool_name]["collect"](domain)
+    return _REGISTRY[tool_name]["collect"](domain, **kwargs)

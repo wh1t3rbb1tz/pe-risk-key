@@ -2,6 +2,8 @@
 
 import ast
 import json
+import ssl
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,10 +17,11 @@ from pe_risk_key.collectors import (
     run,
     tool_definitions,
 )
-from pe_risk_key.collectors import ct, dnssec, email_auth, net
+from pe_risk_key.collectors import ct, dnssec, email_auth, kev, net, web_posture
 from pe_risk_key.collectors.registry import register
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "outside_in"
+KEV_MINI = Path(__file__).resolve().parent / "data" / "kev_mini.json"
 DOMAIN = "brightwaterfleet.example"
 
 SPF_RECORD = "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all"
@@ -175,6 +178,8 @@ def test_demo_mode_returns_fixture_sections(monkeypatch):
     assert run("check_email_auth", DOMAIN) == fixture["check_email_auth"]
     assert run("check_dnssec", DOMAIN) == fixture["check_dnssec"]
     assert run("enumerate_ct_subdomains", DOMAIN) == fixture["enumerate_ct_subdomains"]
+    assert run("check_web_posture", DOMAIN) == fixture["check_web_posture"]
+    assert run("match_known_exploited", DOMAIN) == fixture["match_known_exploited"]
     copper = json.loads(
         (FIXTURES_DIR / "copperline.example.json").read_text(encoding="utf-8")
     )
@@ -201,6 +206,8 @@ def test_tool_definitions_shape():
         "check_email_auth",
         "check_dnssec",
         "enumerate_ct_subdomains",
+        "check_web_posture",
+        "match_known_exploited",
     }
     for definition in defs:
         assert definition["type"] == "function"
@@ -284,7 +291,7 @@ def test_safe_get_allows_boundary_hosts(monkeypatch):
 
 def test_only_net_imports_http():
     root = Path(pe_risk_key.collectors.__file__).parent
-    banned = {"socket", "requests", "httpx", "urllib"}
+    banned = {"socket", "ssl", "requests", "httpx", "urllib"}
     offenders = []
     for path in sorted(root.glob("*.py")):
         if path.name == "net.py":
@@ -301,3 +308,347 @@ def test_only_net_imports_http():
                 if module in banned:
                     offenders.append(f"{path.name} imports {module}")
     assert offenders == []
+
+
+class _RawSocket:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _TLSSocket(_RawSocket):
+    def __init__(self, version="TLSv1.3", cert=None):
+        self._version = version
+        self._cert = cert
+
+    def version(self):
+        return self._version
+
+    def getpeercert(self):
+        return self._cert
+
+
+class _FakeContext:
+    def __init__(self, *args, sock=None, fail=None, record=None):
+        self._sock = sock if sock is not None else _RawSocket()
+        self._fail = fail
+        self._record = record if record is not None else {}
+
+    def wrap_socket(self, sock, server_hostname=None):
+        self._record["server_hostname"] = server_hostname
+        if self._fail is not None:
+            raise self._fail
+        return self._sock
+
+    def set_ciphers(self, spec):
+        self._record["ciphers"] = spec
+
+
+TLS_CERT = {
+    "issuer": (
+        (("countryName", "US"),),
+        (("organizationName", "Example Public CA"),),
+    ),
+    "notAfter": "Jan 02 00:00:00 2031 GMT",
+}
+
+
+def test_tls_info(monkeypatch):
+    conns: list = []
+
+    def fake_connect(addr, timeout=None):
+        conns.append((addr, timeout))
+        return _RawSocket()
+
+    tls_sock = _TLSSocket(version="TLSv1.3", cert=TLS_CERT)
+    monkeypatch.setattr("socket.create_connection", fake_connect)
+    monkeypatch.setattr(
+        "ssl.create_default_context",
+        lambda: SimpleNamespace(
+            wrap_socket=lambda sock, server_hostname=None: tls_sock
+        ),
+    )
+    net.begin_run(DOMAIN)
+    info = net.tls_info(DOMAIN)
+    assert info["version"] == "TLSv1.3"
+    assert info["issuer"] == "Example Public CA"
+    assert info["not_after"] == "2031-01-02T00:00:00+00:00"
+    expected_days = (
+        datetime(2031, 1, 2, tzinfo=timezone.utc)
+        - datetime.now(timezone.utc)
+    ).days
+    assert info["days_remaining"] == expected_days
+    assert conns == [((DOMAIN, 443), 10.0)]
+
+
+def test_tls_info_normalizes_legacy_version_and_issuer_fallback(monkeypatch):
+    monkeypatch.setattr(
+        "socket.create_connection", lambda addr, timeout=None: _RawSocket()
+    )
+    cases = [
+        (
+            {
+                "issuer": ((("commonName", "example-ca"),),),
+                "notAfter": "Jan 02 00:00:00 2031 GMT",
+            },
+            "TLSv1",
+            "TLSv1.0",
+            "example-ca",
+        ),
+        ({"issuer": (), "notAfter": "Jan 02 00:00:00 2031 GMT"}, "TLSv1.2", "TLSv1.2", ""),
+    ]
+    for cert, raw_version, version, issuer in cases:
+        tls_sock = _TLSSocket(version=raw_version, cert=cert)
+        monkeypatch.setattr(
+            "ssl.create_default_context",
+            lambda tls_sock=tls_sock: SimpleNamespace(
+                wrap_socket=lambda sock, server_hostname=None: tls_sock
+            ),
+        )
+        net.begin_run(DOMAIN)
+        info = net.tls_info(DOMAIN)
+        assert info["version"] == version
+        assert info["issuer"] == issuer
+
+
+def test_tls_info_rejects_non_apex_hosts():
+    net.begin_run(DOMAIN)
+    with pytest.raises(SafetyBoundaryError, match="apex or www"):
+        net.tls_info("crt.sh")
+    with pytest.raises(SafetyBoundaryError, match="apex or www"):
+        net.tls_info("evil.example")
+
+
+def test_tls_accepts_true_forces_version(monkeypatch):
+    record: dict = {}
+    conns: list = []
+
+    def fake_connect(addr, timeout=None):
+        conns.append(addr)
+        return _RawSocket()
+
+    def fake_context(*args):
+        ctx = _FakeContext(record=record)
+        record["ctx"] = ctx
+        return ctx
+
+    monkeypatch.setattr("socket.create_connection", fake_connect)
+    monkeypatch.setattr("ssl.SSLContext", fake_context)
+    net.begin_run(DOMAIN)
+    assert net.tls_accepts(DOMAIN, "TLSv1.0") is True
+    assert record["ctx"].minimum_version == ssl.TLSVersion.TLSv1
+    assert record["ctx"].maximum_version == ssl.TLSVersion.TLSv1
+    assert record["ciphers"] == "DEFAULT@SECLEVEL=0"
+    assert conns == [(DOMAIN, 443)]
+
+
+def test_tls_accepts_false_on_handshake_refusal(monkeypatch):
+    def fake_context(*args):
+        return _FakeContext(fail=ssl.SSLError("refused"))
+
+    monkeypatch.setattr(
+        "socket.create_connection", lambda addr, timeout=None: _RawSocket()
+    )
+    monkeypatch.setattr("ssl.SSLContext", fake_context)
+    net.begin_run(DOMAIN)
+    assert net.tls_accepts(DOMAIN, "TLSv1.1") is False
+
+
+def test_tls_accepts_unknown_when_version_unconfigurable(monkeypatch):
+    class _NoFloorContext(_FakeContext):
+        def __setattr__(self, key, value):
+            if key in ("minimum_version", "maximum_version"):
+                raise AttributeError("TLS floors unsupported")
+            super().__setattr__(key, value)
+
+    monkeypatch.setattr("ssl.SSLContext", _NoFloorContext)
+    net.begin_run(DOMAIN)
+    assert net.tls_accepts(DOMAIN, "TLSv1.0") == "unknown"
+
+
+def test_tls_accepts_unknown_when_unreachable(monkeypatch):
+    def fail_connect(addr, timeout=None):
+        raise OSError("down")
+
+    monkeypatch.setattr("socket.create_connection", fail_connect)
+    monkeypatch.setattr("ssl.SSLContext", _FakeContext)
+    net.begin_run(DOMAIN)
+    assert net.tls_accepts(DOMAIN, "TLSv1.0") == "unknown"
+
+
+def test_tls_accepts_probe_limit_is_per_host(monkeypatch):
+    monkeypatch.setattr(
+        "socket.create_connection", lambda addr, timeout=None: _RawSocket()
+    )
+    monkeypatch.setattr("ssl.SSLContext", _FakeContext)
+    net.begin_run(DOMAIN)
+    assert net.tls_accepts(DOMAIN, "TLSv1.0") is True
+    assert net.tls_accepts(DOMAIN, "TLSv1.1") is True
+    with pytest.raises(SafetyBoundaryError, match="probe"):
+        net.tls_accepts(DOMAIN, "TLSv1.0")
+    assert net.tls_accepts(f"www.{DOMAIN}", "TLSv1.0") is True
+
+
+def test_tls_accepts_rejects_bad_version():
+    net.begin_run(DOMAIN)
+    with pytest.raises(ValueError, match="TLSv1"):
+        net.tls_accepts(DOMAIN, "TLSv1.2")
+
+
+APEX_HTML = "<html><head><title>apex</title></head><body>hi</body></html>"
+WWW_HTML = """<html><head>
+<meta name="generator" content="WordPress 6.2">
+</head><body>
+<a href="/examplegate/login">VPN</a>
+<a href="/about">About</a>
+</body></html>"""
+
+
+class _FakeWeb:
+    def get(self, url, timeout=None):
+        if url == f"https://{DOMAIN}/":
+            headers = {"server": "nginx", "x-frame-options": "SAMEORIGIN"}
+            text = APEX_HTML
+        else:
+            headers = {}
+            text = WWW_HTML
+        return SimpleNamespace(
+            headers=headers, text=text, raise_for_status=lambda: None
+        )
+
+
+def test_web_posture_fingerprints_and_tls(monkeypatch):
+    monkeypatch.setattr(net, "httpx", _FakeWeb())
+    monkeypatch.setattr(
+        web_posture,
+        "tls_info",
+        lambda host: {
+            "version": "TLSv1.3",
+            "issuer": "Example Public CA",
+            "not_after": "2031-01-02T00:00:00+00:00",
+            "days_remaining": 800,
+        },
+    )
+    monkeypatch.setattr(
+        web_posture,
+        "tls_accepts",
+        lambda host, version: host == f"www.{DOMAIN}" and version == "TLSv1.0",
+    )
+    net.begin_run(DOMAIN)
+    out = web_posture.collect(DOMAIN)
+    assert out["collection_method"] == "single_https_get"
+    assert set(out) == set(_brightwater_fixture()["check_web_posture"])
+    assert [h["host"] for h in out["hosts"]] == [DOMAIN, f"www.{DOMAIN}"]
+    apex, www = out["hosts"]
+    assert apex["url"] == f"https://{DOMAIN}/"
+    assert apex["headers"]["server"] == "nginx"
+    assert apex["headers"]["x-powered-by"] is None
+    assert apex["fingerprints"] == [
+        {
+            "product": "nginx",
+            "version": None,
+            "source": "server header",
+            "locator": f"https://{DOMAIN}/ (server header)",
+        }
+    ]
+    assert apex["tls_versions"] == ["TLSv1.3"]
+    assert www["tls_versions"] == ["TLSv1.0", "TLSv1.3"]
+    assert www["fingerprints"] == [
+        {
+            "product": "WordPress",
+            "version": "6.2",
+            "source": "meta generator tag",
+            "locator": f"https://www.{DOMAIN}/ (meta generator tag)",
+        },
+        {
+            "product": "ExampleGate SSL-VPN",
+            "version": None,
+            "source": "link /examplegate/login",
+            "locator": f"https://www.{DOMAIN}/ (link /examplegate/login)",
+        },
+    ]
+    assert www["cert"]["issuer"] == "Example Public CA"
+    fixture_host = _brightwater_fixture()["check_web_posture"]["hosts"][0]
+    assert set(apex) == set(fixture_host)
+    assert set(apex["cert"]) == set(fixture_host["cert"])
+    assert set(apex["fingerprints"][0]) == set(fixture_host["fingerprints"][0])
+
+
+def test_kev_product_match_and_note(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    matched_fp = {
+        "host": f"www.{DOMAIN}",
+        "product": "examplegate ssl-vpn",
+        "version": "7.0.11",
+        "source": "link /examplegate/login",
+        "locator": f"https://www.{DOMAIN}/ (link /examplegate/login)",
+    }
+    fps = [
+        matched_fp,
+        {
+            "host": DOMAIN,
+            "product": "nginx",
+            "version": None,
+            "source": "server header",
+            "locator": f"https://{DOMAIN}/ (server header)",
+        },
+    ]
+    out = kev.collect(DOMAIN, fingerprints=fps)
+    assert out["collection_method"] == "offline_lookup"
+    assert out["matches_count"] == 1
+    (match,) = out["matches"]
+    assert match["cve_id"] == "CVE-PLACEHOLDER-0001"
+    assert match["vendor"] == "ExampleGate"
+    assert match["product"] == "SSL-VPN"
+    assert match["matched_fingerprint"] == matched_fp
+    assert match["kev_snapshot_date"] == "2026-10-20"
+    assert match["match_level"] == "product"
+    assert (
+        match["note"]
+        == "KEV lists products, not affected versions; version not verified."
+    )
+    assert "version" not in match
+
+
+def test_kev_self_collects_posture(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    posture = {
+        "hosts": [
+            {
+                "host": f"www.{DOMAIN}",
+                "fingerprints": [
+                    {
+                        "product": "ExampleGate SSL-VPN",
+                        "version": None,
+                        "source": "link /x",
+                        "locator": "u",
+                    }
+                ],
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        kev, "web_posture", SimpleNamespace(collect=lambda domain: posture)
+    )
+    out = kev.collect(DOMAIN)
+    assert out["matches_count"] == 1
+    assert out["matches"][0]["matched_fingerprint"]["host"] == f"www.{DOMAIN}"
+
+
+def test_kev_missing_snapshot_errors(monkeypatch, tmp_path):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", tmp_path / "nope.json")
+    with pytest.raises(FileNotFoundError, match="update_kev"):
+        kev.collect(DOMAIN, fingerprints=[])
+
+
+def test_run_chains_fingerprints_into_kev(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    out = run(
+        "match_known_exploited",
+        DOMAIN,
+        fingerprints=[{"product": "ExampleGate SSL-VPN", "locator": "u"}],
+    )
+    assert out["matches_count"] == 1

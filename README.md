@@ -24,8 +24,10 @@ PE-native IT and cybersecurity risk digest, built on Meta Muse models for the
 
 PE Risk Key is passive by design: DNS, certificate transparency, a single
 standard HTTPS GET, public records, and documents the user provides. No
-scanning, probing, or authentication attempts. All demo targets are fictional
-companies on the reserved `.example` TLD. See `SPEC.md` §2.
+scanning, probing, or authentication attempts. Up to two handshake-only TLS
+probes per host (TLSv1.0, TLSv1.1) detect deprecated protocol support; no
+application data is sent. All demo targets are fictional companies on the
+reserved `.example` TLD. See `SPEC.md` §2.
 
 ## Status
 

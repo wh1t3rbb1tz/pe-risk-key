@@ -1,0 +1,16 @@
+{
+  "snapshot_source": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+  "snapshot_date": "2026-10-20",
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-PLACEHOLDER-0001",
+      "vendorProject": "ExampleGate",
+      "product": "SSL-VPN"
+    },
+    {
+      "cveID": "CVE-2024-99999",
+      "vendorProject": "OtherCorp",
+      "product": "Widget Server"
+    }
+  ]
+}

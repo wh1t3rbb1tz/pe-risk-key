@@ -24,6 +24,7 @@ This boundary is a product feature and a hard engineering constraint. Collectors
 - Public DNS queries (MX, TXT, CAA, DNSKEY/DS, NS)
 - Certificate Transparency log queries (crt.sh)
 - One standard HTTPS GET to the apex and `www` (what any browser does), reading headers, TLS handshake metadata, and page markup for technology fingerprints
+- Up to two handshake-only TLS probes per host (TLSv1.0, TLSv1.1) to detect deprecated protocol support; no application data is sent.
 - Public records and news via Muse search grounding (SEC filings, breach notices, press)
 - Documents the user uploads (SOC 2, pen-test summary, questionnaire, insurance application)
 - Interview recordings the user uploads and has the right to process

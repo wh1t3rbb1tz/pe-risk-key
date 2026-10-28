@@ -31,16 +31,16 @@
         "host": "copperline.example",
         "url": "https://copperline.example/",
         "tls_versions": ["TLSv1.2", "TLSv1.3"],
-        "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
-        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
-        "fingerprints": [ { "product": "cloud CDN", "version": null, "source": "via header" } ]
+        "cert": { "issuer": "Example Public CA", "days_remaining": 71, "not_after": "2027-01-07T00:00:00+00:00" },
+        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": null, "x-powered-by": null },
+        "fingerprints": [ { "product": "cloud CDN", "version": null, "source": "via header", "locator": "https://copperline.example/ (via header)" } ]
       },
       {
         "host": "www.copperline.example",
         "url": "https://www.copperline.example/",
         "tls_versions": ["TLSv1.2", "TLSv1.3"],
-        "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
-        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
+        "cert": { "issuer": "Example Public CA", "days_remaining": 71, "not_after": "2027-01-07T00:00:00+00:00" },
+        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": null, "x-powered-by": null },
         "fingerprints": []
       }
     ]

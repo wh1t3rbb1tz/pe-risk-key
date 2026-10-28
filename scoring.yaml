@@ -1,0 +1,210 @@
+# PE Risk Key deterministic scoring configuration.
+# Consumed by engine/scoring.py. No model calls are made in scoring.
+# Same findings in -> same score out. Change weights here, never in code.
+
+version: 1
+
+# --- Finding penalties -------------------------------------------------------
+# Each finding subtracts points from its CSF function's score (starting at 100).
+severity_points:
+  critical: 35
+  high: 18
+  medium: 8
+  low: 3
+  info: 0
+
+confidence_multiplier:
+  high: 1.0
+  medium: 0.75
+  low: 0.4
+
+# Repeated findings in the same csf_category have diminishing penalties
+# so one noisy category cannot zero a function by itself.
+same_category_decay: [1.0, 0.6, 0.35, 0.2]  # 1st, 2nd, 3rd, 4th+ finding
+
+# Contradictions add a penalty on top of the underlying finding, because a
+# management claim that conflicts with evidence is itself a governance signal.
+contradiction_points:
+  contradicted:
+    critical: 15
+    high: 10
+    medium: 5
+    low: 2
+  unsupported:
+    critical: 6
+    high: 4
+    medium: 2
+    low: 0
+  supported: 0          # shown in the UI, never penalized
+contradiction_function: GV   # contradiction penalties apply to Govern
+
+# --- Function weights (NIST CSF 2.0) ----------------------------------------
+function_weights:
+  GV: 0.20
+  ID: 0.15
+  PR: 0.30
+  DE: 0.15
+  RS: 0.10
+  RC: 0.10
+# Functions with no evidence at all are scored but flagged; see confidence.
+
+# --- Overall rating ----------------------------------------------------------
+rating_bands:        # inclusive lower bounds on weighted score
+  A: 85
+  B: 70
+  C: 55
+  D: 40
+  F: 0
+
+# Caps limit the rating regardless of the numeric score.
+rating_caps:
+  - id: CAP-CRIT
+    when: "any finding severity == critical and confidence in [medium, high]"
+    max_rating: C
+  - id: CAP-SOC2-QUAL
+    when: "soc2_analysis.opinion in [qualified, adverse, disclaimer]"
+    max_rating: C
+  - id: CAP-INCIDENT
+    when: "any finding rule_id == PUB-INCIDENT-RECENT"
+    max_rating: C
+  - id: CAP-CONTRADICTION
+    when: "count(contradictions where verdict == contradicted and severity in [critical, high]) >= 2"
+    max_rating: D
+
+# --- Confidence --------------------------------------------------------------
+confidence:
+  high:   "domain_scan and soc2 provided and interview provided"
+  medium: "domain_scan and (soc2 provided or interview provided)"
+  low:    "otherwise"
+
+# --- Deal signal -------------------------------------------------------------
+# Evaluated top to bottom; first match wins.
+deal_signal_rules:
+  - signal: escalate_full_diligence
+    when: "rating in [D, F] or 'CAP-INCIDENT' in caps_applied"
+  - signal: reprice_or_restructure
+    when: "remediation total_cost_high_usd > 0.01 * revenue_midpoint_usd"
+  - signal: proceed_with_conditions
+    when: "rating == C or any finding severity == high"
+  - signal: proceed
+    when: "true"
+
+revenue_midpoint_usd:
+  "<10M": 5000000
+  "10M-50M": 30000000
+  "50M-250M": 150000000
+  "250M-1B": 600000000
+  ">1B": 2000000000
+
+# --- Remediation cost bands --------------------------------------------------
+# Defaults by severity and company size (employee_band). A rule below may
+# override. Ranges are triage estimates; label them as such in the UI.
+cost_bands_usd:
+  "1-50":      { critical: [15000, 60000],  high: [5000, 25000],   medium: [2000, 10000],  low: [500, 3000] }
+  "51-200":    { critical: [40000, 150000], high: [15000, 60000],  medium: [5000, 20000],  low: [1000, 5000] }
+  "201-1000":  { critical: [100000, 400000],high: [40000, 150000], medium: [10000, 50000], low: [2000, 10000] }
+  "1001-5000": { critical: [250000, 1000000], high: [100000, 400000], medium: [25000, 100000], low: [5000, 20000] }
+  "5000+":     { critical: [500000, 2500000], high: [200000, 800000], medium: [50000, 200000], low: [10000, 40000] }
+
+# --- Rules: signal -> finding -----------------------------------------------
+# Collectors and analyzers emit signals. Rules map known signals to a
+# baseline severity and CSF category. The model may raise or lower severity
+# by at most one level and must justify it in deal_impact.
+rules:
+  # Email and DNS
+  - id: EMAIL-DMARC-NONE
+    match: "dmarc.policy == none"
+    severity: high
+    csf: PR.DS
+    title: "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud"
+  - id: EMAIL-DMARC-MISSING
+    match: "dmarc.record is null"
+    severity: high
+    csf: PR.DS
+    title: "No DMARC record"
+  - id: EMAIL-SPF-SOFT
+    match: "spf.qualifier in ['~all', '?all']"
+    severity: medium
+    csf: PR.DS
+    title: "SPF uses soft/neutral fail"
+  - id: DNS-NO-DNSSEC
+    match: "dnssec.enabled == false"
+    severity: low
+    csf: PR.PS
+    title: "DNSSEC not enabled"
+
+  # Attack surface
+  - id: SURFACE-RISKY-HOSTS
+    match: "ct.risky_hostnames_count >= 1"
+    severity: medium
+    csf: ID.AM
+    title: "Publicly logged hostnames suggest exposed admin/legacy/staging systems"
+  - id: SURFACE-SPRAWL
+    match: "ct.unique_hostnames > 40"
+    severity: low
+    csf: ID.AM
+    title: "Large certificate footprint relative to company size"
+
+  # Web posture
+  - id: WEB-LEGACY-TLS
+    match: "web.tls_versions contains 'TLSv1.0' or web.tls_versions contains 'TLSv1.1'"
+    severity: medium
+    csf: PR.DS
+    title: "Deprecated TLS versions offered"
+  - id: WEB-NO-HSTS
+    match: "web.hsts is null"
+    severity: low
+    csf: PR.DS
+    title: "HSTS not set"
+  - id: WEB-CERT-EXPIRING
+    match: "web.cert_days_remaining < 14"
+    severity: medium
+    csf: PR.PS
+    title: "TLS certificate expiring within 14 days"
+
+  # Known exploited
+  - id: KEV-POTENTIAL
+    match: "kev.matches_count >= 1"
+    severity: critical
+    max_confidence: medium   # fingerprint-based; never high
+    csf: ID.RA
+    title: "Potential exposure to a CISA Known Exploited Vulnerability"
+
+  # Public record
+  - id: PUB-INCIDENT-RECENT
+    match: "incident.disclosed_within_months <= 24"
+    severity: high
+    csf: RS.MA
+    title: "Publicly disclosed security incident in the last 24 months"
+
+  # SOC 2 derived
+  - id: SOC2-EXCEPTION-ACCESS
+    match: "soc2.exception.control_id in ['CC6.1', 'CC6.2', 'CC6.3']"
+    severity: high
+    csf: PR.AA
+    title: "SOC 2 exception in logical access controls"
+  - id: SOC2-EXCEPTION-MONITORING
+    match: "soc2.exception.control_id in ['CC7.2', 'CC7.3']"
+    severity: high
+    csf: DE.CM
+    title: "SOC 2 exception in security monitoring"
+  - id: SOC2-EXCEPTION-CHANGE
+    match: "soc2.exception.control_id == 'CC8.1'"
+    severity: medium
+    csf: PR.PS
+    title: "SOC 2 exception in change management"
+  - id: SOC2-EXCEPTION-VENDOR
+    match: "soc2.exception.control_id in ['CC9.2']"
+    severity: medium
+    csf: GV.SC
+    title: "SOC 2 exception in vendor risk management"
+  - id: SOC2-BRIDGE-GAP
+    match: "soc2.bridge_gap_days > 90"
+    severity: medium
+    csf: GV.OV
+    title: "SOC 2 report period ended more than 90 days ago; no bridge letter provided"
+  - id: SOC2-CARVE-OUT-CRITICAL
+    match: "soc2.subservice_org.method == carve_out and soc2.subservice_org.critical == true"
+    severity: low
+    csf: GV.SC
+    title: "Critical subservice organization carved out of SOC 2 scope"

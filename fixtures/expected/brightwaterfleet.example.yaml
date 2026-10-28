@@ -1,0 +1,62 @@
+# Expected results for the Brightwater fixture.
+# eval/ uses this to compute recall on findings and precision on contradictions.
+# A finding "matches" when rule_id matches. Severity may differ by one level
+# (the model is allowed to adjust); report exact-severity matches separately.
+
+target: brightwaterfleet.example
+inputs:
+  outside_in: fixtures/outside_in/brightwaterfleet.example.json
+  documents: [fixtures/documents/brightwater_soc2_type2.md]
+  interviews: [fixtures/interviews/brightwater_cto_interview.m4a]
+digest_date: 2026-10-30   # pin for deterministic bridge_gap_days
+
+expected_findings:
+  # outside-in
+  - { rule_id: EMAIL-DMARC-NONE,         severity: high }
+  - { rule_id: EMAIL-SPF-SOFT,           severity: medium }
+  - { rule_id: DNS-NO-DNSSEC,            severity: low }
+  - { rule_id: SURFACE-RISKY-HOSTS,      severity: medium }
+  - { rule_id: SURFACE-SPRAWL,           severity: low }
+  - { rule_id: WEB-LEGACY-TLS,           severity: medium }
+  - { rule_id: WEB-NO-HSTS,              severity: low }
+  - { rule_id: KEV-POTENTIAL,            severity: critical, max_confidence: medium }
+  - { rule_id: PUB-INCIDENT-RECENT,      severity: high }
+  # SOC 2
+  - { rule_id: SOC2-EXCEPTION-ACCESS,    severity: high, control_id: CC6.1 }
+  - { rule_id: SOC2-EXCEPTION-ACCESS,    severity: high, control_id: CC6.2 }
+  - { rule_id: SOC2-EXCEPTION-MONITORING, severity: high, control_id: CC7.2 }
+  - { rule_id: SOC2-EXCEPTION-CHANGE,    severity: medium, control_id: CC8.1 }
+  - { rule_id: SOC2-BRIDGE-GAP,          severity: medium }
+  - { rule_id: SOC2-CARVE-OUT-CRITICAL,  severity: low, subservice_org: Nimbus Cloud Services }
+
+must_not_find:
+  - SOC2-EXCEPTION-VENDOR      # CC9.2 had no exceptions
+  - WEB-CERT-EXPIRING          # 63 days remaining
+  - EMAIL-DMARC-MISSING        # record exists
+
+expected_soc2:
+  opinion: unqualified          # "except for deviations" language did not modify the opinion
+  period_end: 2026-03-31
+  bridge_gap_days: 213          # 2026-03-31 -> 2026-10-30
+  exception_control_ids: [CC6.1, CC6.2, CC7.2, CC8.1]
+  carve_outs: [Nimbus Cloud Services, LedgerPay Payroll]
+  cuec_count: 5
+
+expected_contradictions:
+  - { claim_ref: 1, topic: admin MFA coverage,      verdict: contradicted, severity: high }
+  - { claim_ref: 2, topic: automated offboarding,   verdict: contradicted, severity: high }
+  - { claim_ref: 3, topic: every alert reviewed,    verdict: contradicted, severity: high }
+  - { claim_ref: 4, topic: DMARC enforced,          verdict: contradicted, severity: high }
+  - { claim_ref: 5, topic: no breach history,       verdict: contradicted, severity: high }
+  - { claim_ref: 6, topic: legacy decommissioned,   verdict: contradicted, severity: medium }
+  - { claim_ref: 7, topic: clean pen test,          verdict: contradicted, severity: medium }
+  - { claim_ref: 8, topic: immutable backups,       verdict: supported }
+  - { claim_ref: 9, topic: bridge letter available, verdict: supported }
+
+expected_overall:
+  # Caps that must fire. Exact score is asserted in tests/test_scoring.py
+  # once the engine exists; do not hand-compute it here.
+  caps_applied: [CAP-CRIT, CAP-INCIDENT, CAP-CONTRADICTION]
+  max_rating: D
+  deal_signal: escalate_full_diligence
+  confidence: high

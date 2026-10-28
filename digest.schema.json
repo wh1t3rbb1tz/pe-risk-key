@@ -1,0 +1,846 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pe-risk-key.example/schemas/digest.schema.json",
+  "title": "PERiskKeyDigest",
+  "description": "PE-native IT and cybersecurity risk digest. Produced by the pipeline; consumed by the REST API, MCP server, and dashboard.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "digest_id",
+    "generated_at",
+    "target",
+    "mode",
+    "inputs",
+    "overall",
+    "function_scores",
+    "findings",
+    "contradictions",
+    "remediation_plan",
+    "deal_recommendations",
+    "narrative",
+    "limitations"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "digest_id": {
+      "type": "string",
+      "pattern": "^dg_[a-z0-9]{12}$"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "name",
+        "domain"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "industry": {
+          "type": "string"
+        },
+        "revenue_band": {
+          "$ref": "#/$defs/size_band"
+        },
+        "employee_band": {
+          "type": "string",
+          "enum": [
+            "1-50",
+            "51-200",
+            "201-1000",
+            "1001-5000",
+            "5000+"
+          ]
+        }
+      }
+    },
+    "mode": {
+      "type": "object",
+      "required": [
+        "confidential",
+        "providers"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "confidential": {
+          "type": "boolean",
+          "description": "If true, documents and transcripts were processed only by the open-weight deployment."
+        },
+        "demo": {
+          "type": "boolean",
+          "description": "If true, raw signals came from fixtures."
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "provider",
+              "model"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "orchestrator",
+                  "document_analysis",
+                  "transcription",
+                  "claim_extraction",
+                  "crosscheck",
+                  "narrative"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "meta_model_api",
+                  "baseten",
+                  "modal",
+                  "fireworks"
+                ]
+              },
+              "model": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "required": [
+        "domain_scan",
+        "documents",
+        "interviews"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "domain_scan": {
+          "type": "boolean"
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "doc_id",
+              "type",
+              "filename",
+              "sha256"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "doc_id": {
+                "type": "string",
+                "pattern": "^doc_[a-z0-9]+$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "soc2_type2",
+                  "soc2_type1",
+                  "pentest_summary",
+                  "security_questionnaire",
+                  "insurance_application",
+                  "other"
+                ]
+              },
+              "filename": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        },
+        "interviews": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "interview_id",
+              "filename",
+              "sha256",
+              "duration_seconds"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "interview_id": {
+                "type": "string",
+                "pattern": "^int_[a-z0-9]+$"
+              },
+              "filename": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "duration_seconds": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "speakers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "overall": {
+      "type": "object",
+      "required": [
+        "score",
+        "rating",
+        "deal_signal",
+        "confidence",
+        "rating_caps_applied"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "rating": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            "F"
+          ]
+        },
+        "deal_signal": {
+          "type": "string",
+          "enum": [
+            "proceed",
+            "proceed_with_conditions",
+            "reprice_or_restructure",
+            "escalate_full_diligence"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "rating_caps_applied": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "IDs of cap rules from scoring.yaml that limited the rating."
+        }
+      }
+    },
+    "function_scores": {
+      "type": "array",
+      "description": "Score per NIST CSF 2.0 function.",
+      "items": {
+        "type": "object",
+        "required": [
+          "function",
+          "score",
+          "finding_count"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "function": {
+            "$ref": "#/$defs/csf_function"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "finding_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contradiction"
+      }
+    },
+    "soc2_analysis": {
+      "$ref": "#/$defs/soc2_analysis"
+    },
+    "remediation_plan": {
+      "type": "object",
+      "required": [
+        "items",
+        "total_cost_low_usd",
+        "total_cost_high_usd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "action",
+              "finding_ids",
+              "window",
+              "cost_low_usd",
+              "cost_high_usd"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "finding_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/finding_id"
+                },
+                "minItems": 1
+              },
+              "window": {
+                "type": "string",
+                "enum": [
+                  "days_0_30",
+                  "days_31_60",
+                  "days_61_100",
+                  "post_100"
+                ]
+              },
+              "cost_low_usd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "cost_high_usd": {
+                "type": "number",
+                "minimum": 0
+              },
+              "owner_role": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "total_cost_low_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "total_cost_high_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "deal_recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "text",
+          "basis_ids"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "closing_condition",
+              "specific_indemnity",
+              "escrow_or_holdback",
+              "price_adjustment",
+              "rw_insurance_note",
+              "cyber_insurance",
+              "post_close_covenant",
+              "full_diligence_scope"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "basis_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(F|C)-[0-9]{3}$"
+            },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "narrative": {
+      "type": "object",
+      "required": [
+        "executive_summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "executive_summary": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "key_questions_for_management": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What this digest did not or could not assess. Always non-empty."
+    },
+    "trace_ref": {
+      "type": "string",
+      "description": "Pointer to the agent trace for this run."
+    }
+  },
+  "$defs": {
+    "finding_id": {
+      "type": "string",
+      "pattern": "^F-[0-9]{3}$"
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info"
+      ]
+    },
+    "size_band": {
+      "type": "string",
+      "enum": [
+        "<10M",
+        "10M-50M",
+        "50M-250M",
+        "250M-1B",
+        ">1B"
+      ]
+    },
+    "csf_function": {
+      "type": "string",
+      "enum": [
+        "GV",
+        "ID",
+        "PR",
+        "DE",
+        "RS",
+        "RC"
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "source_type",
+        "collection_method",
+        "locator",
+        "excerpt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "pattern": "^E-[0-9]{3}$"
+        },
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "outside_in",
+            "document",
+            "interview",
+            "public_record"
+          ]
+        },
+        "collection_method": {
+          "type": "string",
+          "enum": [
+            "dns_query",
+            "ct_log_query",
+            "single_https_get",
+            "offline_lookup",
+            "search_grounding",
+            "document_upload",
+            "interview_upload"
+          ]
+        },
+        "collector": {
+          "type": "string",
+          "description": "Collector or analyzer name that produced this evidence."
+        },
+        "locator": {
+          "type": "string",
+          "description": "Where to verify: DNS record name, hostname, doc section/page/control ID, transcript timestamp, URL."
+        },
+        "excerpt": {
+          "type": "string",
+          "maxLength": 600
+        },
+        "collected_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": [
+        "finding_id",
+        "title",
+        "severity",
+        "confidence",
+        "csf_function",
+        "csf_category",
+        "source",
+        "evidence",
+        "deal_impact",
+        "remediation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "finding_id": {
+          "$ref": "#/$defs/finding_id"
+        },
+        "rule_id": {
+          "type": "string",
+          "description": "Matching rule in scoring.yaml, if any."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 140
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "csf_function": {
+          "$ref": "#/$defs/csf_function"
+        },
+        "csf_category": {
+          "type": "string",
+          "pattern": "^(GV|ID|PR|DE|RS|RC)\\.[A-Z]{2}$",
+          "examples": [
+            "PR.AA",
+            "DE.CM",
+            "GV.SC"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "outside_in",
+            "document",
+            "interview",
+            "crosscheck",
+            "public_record"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence"
+          },
+          "minItems": 1
+        },
+        "deal_impact": {
+          "type": "string",
+          "maxLength": 400,
+          "description": "Plain-language impact on the deal, value creation, or insurability."
+        },
+        "remediation": {
+          "type": "object",
+          "required": [
+            "summary",
+            "cost_low_usd",
+            "cost_high_usd",
+            "effort_weeks"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "summary": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "cost_low_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "cost_high_usd": {
+              "type": "number",
+              "minimum": 0
+            },
+            "effort_weeks": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "required": [
+        "contradiction_id",
+        "claim",
+        "verdict",
+        "severity",
+        "evidence_refs",
+        "explanation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contradiction_id": {
+          "type": "string",
+          "pattern": "^C-[0-9]{3}$"
+        },
+        "claim": {
+          "type": "object",
+          "required": [
+            "speaker",
+            "timestamp",
+            "text",
+            "claim_type"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "speaker": {
+              "type": "string"
+            },
+            "timestamp": {
+              "type": "string",
+              "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "claim_type": {
+              "type": "string",
+              "enum": [
+                "control_exists",
+                "control_coverage",
+                "incident_history",
+                "third_party_assurance",
+                "process_maturity"
+              ]
+            }
+          }
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "contradicted",
+            "unsupported",
+            "supported"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(E|F)-[0-9]{3}$"
+          },
+          "description": "Must reference IDs present in this digest. Empty only when verdict is 'unsupported'."
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "soc2_analysis": {
+      "type": "object",
+      "required": [
+        "doc_id",
+        "report_type",
+        "period_start",
+        "period_end",
+        "auditor",
+        "opinion",
+        "exceptions",
+        "subservice_orgs",
+        "cuecs",
+        "bridge_gap_days"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "doc_id": {
+          "type": "string"
+        },
+        "report_type": {
+          "type": "string",
+          "enum": [
+            "type1",
+            "type2"
+          ]
+        },
+        "period_start": {
+          "type": "string",
+          "format": "date"
+        },
+        "period_end": {
+          "type": "string",
+          "format": "date"
+        },
+        "auditor": {
+          "type": "string"
+        },
+        "opinion": {
+          "type": "string",
+          "enum": [
+            "unqualified",
+            "qualified",
+            "adverse",
+            "disclaimer"
+          ]
+        },
+        "trust_services_categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "security",
+              "availability",
+              "confidentiality",
+              "processing_integrity",
+              "privacy"
+            ]
+          }
+        },
+        "exceptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "control_id",
+              "description",
+              "deviations",
+              "sample_size",
+              "locator"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "control_id": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "deviations": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sample_size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "management_response": {
+                "type": "string"
+              },
+              "locator": {
+                "type": "string"
+              },
+              "finding_id": {
+                "$ref": "#/$defs/finding_id"
+              }
+            }
+          }
+        },
+        "subservice_orgs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "method",
+              "services"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "carve_out",
+                  "inclusive"
+                ]
+              },
+              "services": {
+                "type": "string"
+              },
+              "critical": {
+                "type": "boolean",
+                "description": "True if the subservice org supports a critical function (e.g., production hosting). Used by SOC2-CARVE-OUT-CRITICAL."
+              }
+            }
+          }
+        },
+        "cuecs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bridge_gap_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Days from period_end to digest date."
+        }
+      }
+    }
+  }
+}

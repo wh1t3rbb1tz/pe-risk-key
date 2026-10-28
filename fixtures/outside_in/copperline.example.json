@@ -1,0 +1,47 @@
+{
+  "_fixture_note": "Synthetic comparison target on the reserved .example TLD. Intentionally cleaner than Brightwater so compare_targets has a meaningful contrast. No documents or interview provided, so digest confidence should be low.",
+  "target": {
+    "name": "Copperline Analytics, LLC",
+    "domain": "copperline.example",
+    "industry": "Supply-chain analytics SaaS",
+    "revenue_band": "50M-250M",
+    "employee_band": "201-1000"
+  },
+  "collected_at": "2026-10-28T16:05:00Z",
+  "check_email_auth": {
+    "collection_method": "dns_query",
+    "spf": { "record": "v=spf1 include:_spf.mailhost.example -all", "qualifier": "-all", "lookup_count": 3 },
+    "dmarc": { "record": "v=DMARC1; p=reject; rua=mailto:dmarc@copperline.example", "policy": "reject", "pct": 100, "rua": true },
+    "dkim": { "selectors_found": ["google", "s1"], "selectors_checked": ["default", "selector1", "selector2", "google", "k1", "s1"] }
+  },
+  "check_dnssec": { "collection_method": "dns_query", "enabled": true },
+  "enumerate_ct_subdomains": {
+    "collection_method": "ct_log_query",
+    "unique_hostnames": 12,
+    "risky_hostnames": [
+      { "hostname": "staging.copperline.example", "pattern": "staging", "first_seen": "2025-03-02", "last_seen": "2026-09-15" }
+    ],
+    "risky_hostnames_count": 1
+  },
+  "check_web_posture": {
+    "collection_method": "single_https_get",
+    "hosts": [
+      {
+        "host": "copperline.example",
+        "tls_versions": ["TLSv1.2", "TLSv1.3"],
+        "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
+        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
+        "fingerprints": [ { "product": "cloud CDN", "version": null, "source": "via header" } ]
+      },
+      {
+        "host": "www.copperline.example",
+        "tls_versions": ["TLSv1.2", "TLSv1.3"],
+        "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
+        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
+        "fingerprints": []
+      }
+    ]
+  },
+  "match_known_exploited": { "collection_method": "offline_lookup", "kev_snapshot_date": "2026-10-20", "matches": [], "matches_count": 0 },
+  "search_public_incidents": { "collection_method": "search_grounding", "results": [], "disclosed_within_months": null }
+}

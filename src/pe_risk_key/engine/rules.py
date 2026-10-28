@@ -11,10 +11,12 @@ for the dashboard trace panel. Inputs are never mutated.
 from __future__ import annotations
 
 import copy
+import math
 from typing import Any
 
 SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 CONFIDENCE_ORDER = ["low", "medium", "high"]
+DEFAULT_EMPLOYEE_BAND = "201-1000"
 
 
 def apply_rule_constraints(
@@ -24,18 +26,17 @@ def apply_rule_constraints(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Clamp findings to their scoring.yaml rule bounds.
 
-    ``employee_band`` (from the target record) enables the remediation
-    cost lookup; when omitted, costs are left untouched. Returns
-    ``(constrained_findings, adjustments)``. Findings whose ``rule_id``
-    matches no rule are kept unchanged and recorded with reason
-    ``unknown_rule``.
+    ``employee_band`` (from the target record) sizes remediation costs;
+    when omitted it defaults to ``201-1000`` with a ``default_size_band``
+    adjustment. Returns ``(constrained_findings, adjustments)``. Findings
+    whose ``rule_id`` matches no rule are kept unchanged and recorded
+    with reason ``unknown_rule``.
     """
     rules = {
         rule["id"]: rule
         for rule in scoring_config.get("rules", [])
         if isinstance(rule, dict) and "id" in rule
     }
-    cost_bands = scoring_config.get("cost_bands_usd", {})
     constrained: list[dict[str, Any]] = []
     adjustments: list[dict[str, Any]] = []
     for finding in findings:
@@ -60,7 +61,9 @@ def apply_rule_constraints(
         _clamp_confidence(updated, finding_id, rule, adjustments)
         _clamp_severity(updated, finding_id, rule, adjustments)
         _apply_csf(updated, finding_id, rule, adjustments)
-        _apply_cost(updated, finding_id, rule, cost_bands, employee_band, adjustments)
+        _apply_cost(
+            updated, finding_id, rule, scoring_config, employee_band, adjustments
+        )
         constrained.append(updated)
     return constrained, adjustments
 
@@ -73,40 +76,69 @@ def _is_cost_pair(value: Any) -> bool:
     )
 
 
+def _round_500(value: float) -> int:
+    return int(math.floor(value / 500 + 0.5)) * 500
+
+
 def _apply_cost(
     finding: dict[str, Any],
     finding_id: Any,
     rule: dict[str, Any],
-    cost_bands: Any,
+    scoring_config: dict[str, Any],
     employee_band: str | None,
     adjustments: list[dict[str, Any]],
 ) -> None:
     remediation = finding.get("remediation")
     if not isinstance(remediation, dict):
         return
+    band = employee_band if employee_band is not None else DEFAULT_EMPLOYEE_BAND
     override = rule.get("cost_override_usd")
     if _is_cost_pair(override):
-        low, high = override
-    elif employee_band is not None and isinstance(cost_bands, dict):
-        band = cost_bands.get(employee_band)
-        pair = band.get(finding.get("severity")) if isinstance(band, dict) else None
+        multipliers = scoring_config.get("cost_size_multiplier", {})
+        multiplier = (
+            multipliers.get(band) if isinstance(multipliers, dict) else None
+        )
+        if not isinstance(multiplier, (int, float)):
+            return
+        new = [
+            _round_500(override[0] * multiplier),
+            _round_500(override[1] * multiplier),
+        ]
+        reason = "cost_override"
+    else:
+        bands = scoring_config.get("cost_bands_usd", {})
+        sizes = bands.get(band) if isinstance(bands, dict) else None
+        pair = (
+            sizes.get(finding.get("severity"))
+            if isinstance(sizes, dict)
+            else None
+        )
         if not _is_cost_pair(pair):
             return
-        low, high = pair
-    else:
-        return
+        new = [pair[0], pair[1]]
+        reason = "cost_band"
+    if employee_band is None:
+        adjustments.append(
+            {
+                "finding_id": finding_id,
+                "field": "employee_band",
+                "from": None,
+                "to": DEFAULT_EMPLOYEE_BAND,
+                "reason": "default_size_band",
+            }
+        )
     old = [remediation.get("cost_low_usd"), remediation.get("cost_high_usd")]
-    if old == [low, high]:
+    if old == new:
         return
-    remediation["cost_low_usd"] = low
-    remediation["cost_high_usd"] = high
+    remediation["cost_low_usd"] = new[0]
+    remediation["cost_high_usd"] = new[1]
     adjustments.append(
         {
             "finding_id": finding_id,
             "field": "remediation.cost_usd",
             "from": old,
-            "to": [low, high],
-            "reason": "cost_band",
+            "to": new,
+            "reason": reason,
         }
     )
 

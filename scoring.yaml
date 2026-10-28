@@ -97,14 +97,26 @@ revenue_midpoint_usd:
   ">1B": 2000000000
 
 # --- Remediation cost bands --------------------------------------------------
-# Defaults by severity and company size (employee_band). A rule below may
-# override. Ranges are triage estimates; label them as such in the UI.
+# Fallback only, used when a rule has no cost_override_usd. Defaults by
+# severity and company size (employee_band). Ranges are triage estimates;
+# label them as such in the UI.
 cost_bands_usd:
   "1-50":      { critical: [15000, 60000],  high: [5000, 25000],   medium: [2000, 10000],  low: [500, 3000] }
   "51-200":    { critical: [40000, 150000], high: [15000, 60000],  medium: [5000, 20000],  low: [1000, 5000] }
   "201-1000":  { critical: [100000, 400000],high: [40000, 150000], medium: [10000, 50000], low: [2000, 10000] }
   "1001-5000": { critical: [250000, 1000000], high: [100000, 400000], medium: [25000, 100000], low: [5000, 20000] }
   "5000+":     { critical: [500000, 2500000], high: [200000, 800000], medium: [50000, 200000], low: [10000, 40000] }
+
+# --- Remediation cost size multipliers ---------------------------------------
+# cost_override_usd values are calibrated to a 201-1000 employee company.
+# Overrides are multiplied by the target's band factor below, each bound
+# rounded to the nearest $500.
+cost_size_multiplier:
+  "1-50": 0.4
+  "51-200": 0.7
+  "201-1000": 1.0
+  "1001-5000": 2.0
+  "5000+": 4.0
 
 # --- Rules: signal -> finding -----------------------------------------------
 # Collectors and analyzers emit signals. Rules map known signals to a
@@ -123,6 +135,7 @@ rules:
     severity: high
     csf: PR.DS
     title: "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud"
+    cost_override_usd: [8000, 30000]  # basis: DMARC reporting tool + staged move to reject
   - id: EMAIL-DMARC-MISSING
     match: "dmarc.record is null"
     severity: high
@@ -133,11 +146,13 @@ rules:
     severity: medium
     csf: PR.DS
     title: "SPF uses soft/neutral fail"
+    cost_override_usd: [2000, 8000]  # basis: sender inventory, record change
   - id: DNS-NO-DNSSEC
     match: "dnssec.enabled == false"
     severity: low
     csf: PR.PS
     title: "DNSSEC not enabled"
+    cost_override_usd: [2000, 10000]  # basis: provider/registrar enablement
 
   # Attack surface
   - id: SURFACE-RISKY-HOSTS
@@ -145,11 +160,13 @@ rules:
     severity: medium
     csf: ID.AM
     title: "Publicly logged hostnames suggest exposed admin/legacy/staging systems"
+    cost_override_usd: [10000, 50000]  # basis: inventory, decommission or move behind ZTNA
   - id: SURFACE-SPRAWL
     match: "ct.unique_hostnames > 40"
     severity: low
     csf: ID.AM
     title: "Large certificate footprint relative to company size"
+    cost_override_usd: [5000, 20000]  # basis: asset inventory, cert hygiene
 
   # Web posture
   - id: WEB-LEGACY-TLS
@@ -157,11 +174,13 @@ rules:
     severity: medium
     csf: PR.DS
     title: "Deprecated TLS versions offered"
+    cost_override_usd: [2000, 15000]  # basis: config change + client compatibility testing
   - id: WEB-NO-HSTS
     match: "web.hsts is null"
     severity: low
     csf: PR.DS
     title: "HSTS not set"
+    cost_override_usd: [1000, 5000]  # basis: header + staged max-age
   - id: WEB-CERT-EXPIRING
     match: "web.cert_days_remaining < 14"
     severity: medium
@@ -175,6 +194,7 @@ rules:
     max_confidence: medium   # fingerprint-based; never high
     csf: ID.RA
     title: "Potential exposure to a CISA Known Exploited Vulnerability"
+    cost_override_usd: [25000, 150000]  # basis: emergency patch/replace + compromise assessment
 
   # Public record
   - id: PUB-INCIDENT-RECENT
@@ -182,6 +202,7 @@ rules:
     severity: high
     csf: RS.MA
     title: "Publicly disclosed security incident in the last 24 months"
+    cost_override_usd: [25000, 100000]  # basis: verify post-incident remediation, retrospective review
 
   # SOC 2 derived
   - id: SOC2-EXCEPTION-ACCESS
@@ -189,28 +210,34 @@ rules:
     severity: high
     csf: PR.AA
     title: "SOC 2 exception in logical access controls"
+    cost_override_usd: [20000, 80000]  # basis: HRIS→IdP automation, conditional access cleanup
   - id: SOC2-EXCEPTION-MONITORING
     match: "soc2.exception.control_id in ['CC7.2', 'CC7.3']"
     severity: high
     csf: DE.CM
     title: "SOC 2 exception in security monitoring"
+    cost_override_usd: [15000, 60000]  # basis: alert routing controls, MSSP SLA review
   - id: SOC2-EXCEPTION-CHANGE
     match: "soc2.exception.control_id == 'CC8.1'"
     severity: medium
     csf: PR.PS
     title: "SOC 2 exception in change management"
+    cost_override_usd: [5000, 20000]  # basis: emergency change process, tooling
   - id: SOC2-EXCEPTION-VENDOR
     match: "soc2.exception.control_id in ['CC9.2']"
     severity: medium
     csf: GV.SC
     title: "SOC 2 exception in vendor risk management"
+    cost_override_usd: [5000, 25000]  # basis: vendor review program
   - id: SOC2-BRIDGE-GAP
     match: "soc2.bridge_gap_days > 90"
     severity: medium
     csf: GV.OV
     title: "SOC 2 report period ended more than 90 days ago; no bridge letter provided"
+    cost_override_usd: [2000, 10000]  # basis: bridge letter, audit scheduling
   - id: SOC2-CARVE-OUT-CRITICAL
     match: "soc2.subservice_org.method == carve_out and soc2.subservice_org.critical == true"
     severity: low
     csf: GV.SC
     title: "Critical subservice organization carved out of SOC 2 scope"
+    cost_override_usd: [0, 5000]  # basis: obtain subservice org SOC report

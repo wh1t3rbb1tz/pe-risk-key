@@ -99,6 +99,7 @@ def collect(domain: str, fingerprints: list[dict] | None = None) -> dict:
     )
     return {
         "collection_method": COLLECTION_METHOD,
+        "status": "ok",
         "snapshot_source": snapshot.get("snapshot_source"),
         "kev_snapshot_date": snapshot.get("snapshot_date"),
         "matches": matches,

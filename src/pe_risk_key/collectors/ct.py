@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pe_risk_key.collectors.net import safe_get
+from pe_risk_key.collectors.net import (
+    SafetyBoundaryError,
+    safe_get,
+    short_reason,
+)
 from pe_risk_key.collectors.registry import register
 
 COLLECTION_METHOD = "ct_log_query"
@@ -22,13 +26,25 @@ RISKY_PATTERNS = ["vpn", "jenkins", "staging", "dev", "admin", "legacy", "old"]
 def collect(domain: str) -> dict:
     """Collect CT-log hostnames for a domain (one crt.sh request)."""
     query_url = f"https://crt.sh/?q=%25.{domain}&output=json"
-    response = safe_get(query_url)
-    response.raise_for_status()
-    entries = response.json()
+    try:
+        response = safe_get(query_url)
+        response.raise_for_status()
+        entries = response.json()
+    except SafetyBoundaryError:
+        raise
+    except Exception as exc:
+        return {
+            "collection_method": COLLECTION_METHOD,
+            "status": "error",
+            "error": short_reason(exc),
+            "query_url": query_url,
+        }
     hostnames: dict[str, dict[str, str]] = {}
     apex = domain.lower()
     suffix = f".{apex}"
-    for entry in entries:
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
         # crt.sh packs all names on a cert into one whitespace-separated blob;
         # first/last seen are the validity window aggregated per hostname,
         # the closest this feed offers to observation dates.
@@ -58,6 +74,7 @@ def collect(domain: str) -> dict:
             )
     return {
         "collection_method": COLLECTION_METHOD,
+        "status": "ok",
         "query_url": query_url,
         "unique_hostnames": len(hostnames),
         "risky_hostnames": risky,

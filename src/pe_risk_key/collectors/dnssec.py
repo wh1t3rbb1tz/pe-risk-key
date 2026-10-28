@@ -26,6 +26,7 @@ def collect(domain: str) -> dict:
         enabled = False
     return {
         "collection_method": COLLECTION_METHOD,
+        "status": "ok",
         "queried_name": domain,
         "record_type": "DS",
         "enabled": enabled,

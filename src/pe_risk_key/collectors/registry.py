@@ -107,4 +107,12 @@ def run(tool_name: str, domain: str, **kwargs: Any) -> dict:
         )
         return data[tool_name]
     begin_run(domain)
-    return _REGISTRY[tool_name]["collect"](domain, **kwargs)
+    entry = _REGISTRY[tool_name]
+    try:
+        return entry["collect"](domain, **kwargs)
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "collection_method": entry["collection_method"],
+        }

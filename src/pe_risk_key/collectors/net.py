@@ -23,6 +23,11 @@ TIMEOUT_SECONDS = 10.0
 TLS_PORT = 443
 MAX_TLS_PROBES_PER_HOST = 2
 
+# Pinned at import so short_reason keeps working when tests swap net.httpx.
+_TIMEOUT_EXC = httpx.TimeoutException
+_CONNECT_EXC = httpx.ConnectError
+_HTTP_STATUS_EXC = httpx.HTTPStatusError
+
 
 class SafetyBoundaryError(Exception):
     """A collection attempt stepped outside the SPEC §2 safety boundary."""
@@ -73,7 +78,28 @@ def safe_get(url: str, *, method: str = "GET") -> httpx.Response:
             f"Second request to {host} in one run (at most one per host)."
         )
     _run_hosts.add(host)
-    return httpx.get(url, timeout=TIMEOUT_SECONDS)
+    return httpx.get(url, timeout=TIMEOUT_SECONDS, follow_redirects=False)
+
+
+def short_reason(exc: BaseException) -> str:
+    """Map a transport failure to a short human-readable reason."""
+    if isinstance(exc, _TIMEOUT_EXC):
+        return "timeout"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, socket.gaierror):
+        return "DNS failure"
+    if isinstance(exc, ConnectionRefusedError):
+        return "connection refused"
+    if isinstance(exc, ssl.SSLError):
+        return "TLS error"
+    if isinstance(exc, _CONNECT_EXC):
+        return "connection failed"
+    if isinstance(exc, _HTTP_STATUS_EXC):
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, OSError):
+        return "connection failed"
+    return type(exc).__name__
 
 
 def _check_tls_host(host: str) -> str:

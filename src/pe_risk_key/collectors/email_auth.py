@@ -103,6 +103,7 @@ def collect(domain: str) -> dict:
     }
     return {
         "collection_method": COLLECTION_METHOD,
+        "status": "ok",
         "spf": spf,
         "dmarc": dmarc,
         "dkim": _check_dkim(domain),

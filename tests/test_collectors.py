@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import dns.resolver
+import httpx
 import pe_risk_key.collectors
 import pytest
 
@@ -63,8 +64,8 @@ class _FakeHttp:
         self.calls: list = []
         self.payload = payload
 
-    def get(self, url, timeout=None):
-        self.calls.append({"url": url, "timeout": timeout})
+    def get(self, url, timeout=None, **kwargs):
+        self.calls.append({"url": url, "timeout": timeout, **kwargs})
         return SimpleNamespace(
             json=lambda: self.payload, raise_for_status=lambda: None
         )
@@ -287,6 +288,7 @@ def test_safe_get_allows_boundary_hosts(monkeypatch):
     net.safe_get(f"https://www.{DOMAIN}/")
     net.safe_get("https://crt.sh/?q=%25.x&output=json")
     assert [c["timeout"] for c in fake.calls] == [10.0, 10.0, 10.0]
+    assert all(c["follow_redirects"] is False for c in fake.calls)
 
 
 def test_only_net_imports_http():
@@ -507,16 +509,50 @@ WWW_HTML = """<html><head>
 
 
 class _FakeWeb:
-    def get(self, url, timeout=None):
+    def __init__(self):
+        self.calls: list = []
+
+    def get(self, url, timeout=None, **kwargs):
+        self.calls.append({"url": url, "timeout": timeout, **kwargs})
         if url == f"https://{DOMAIN}/":
             headers = {"server": "nginx", "x-frame-options": "SAMEORIGIN"}
             text = APEX_HTML
         else:
             headers = {}
             text = WWW_HTML
-        return SimpleNamespace(
-            headers=headers, text=text, raise_for_status=lambda: None
-        )
+        return SimpleNamespace(status_code=200, headers=headers, text=text)
+
+
+class _FakeWebPages:
+    """Canned per-URL (status, headers, text) responses or exceptions."""
+
+    def __init__(self, pages):
+        self.calls: list = []
+        self.pages = pages
+
+    def get(self, url, timeout=None, **kwargs):
+        self.calls.append({"url": url, "timeout": timeout, **kwargs})
+        page = self.pages[url]
+        if isinstance(page, Exception):
+            raise page
+        status_code, headers, text = page
+        return SimpleNamespace(status_code=status_code, headers=headers, text=text)
+
+
+def _mock_tls(monkeypatch, accepts=None):
+    monkeypatch.setattr(
+        web_posture,
+        "tls_info",
+        lambda host: {
+            "version": "TLSv1.3",
+            "issuer": "Example Public CA",
+            "not_after": "2031-01-02T00:00:00+00:00",
+            "days_remaining": 800,
+        },
+    )
+    monkeypatch.setattr(
+        web_posture, "tls_accepts", accepts or (lambda host, version: False)
+    )
 
 
 def test_web_posture_fingerprints_and_tls(monkeypatch):
@@ -652,3 +688,144 @@ def test_run_chains_fingerprints_into_kev(monkeypatch):
         fingerprints=[{"product": "ExampleGate SSL-VPN", "locator": "u"}],
     )
     assert out["matches_count"] == 1
+
+
+REDIRECT_HTML = "<html><head><title>moved</title></head><body>moved</body></html>"
+
+
+def test_web_posture_records_redirect_without_following(monkeypatch):
+    pages = {
+        f"https://{DOMAIN}/": (200, {"server": "nginx"}, APEX_HTML),
+        f"https://www.{DOMAIN}/": (
+            301,
+            {
+                "location": f"https://{DOMAIN}/",
+                "strict-transport-security": "max-age=31536000",
+            },
+            REDIRECT_HTML,
+        ),
+    }
+    fake = _FakeWebPages(pages)
+    monkeypatch.setattr(net, "httpx", fake)
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    out = web_posture.collect(DOMAIN)
+    assert out["status"] == "ok"  # a redirect is a valid result
+    apex, www = out["hosts"]
+    assert apex["status"] == "ok"
+    assert www["status"] == "redirect"
+    assert www["status_code"] == 301
+    assert www["redirect_location"] == f"https://{DOMAIN}/"
+    assert www["headers"]["strict-transport-security"] == "max-age=31536000"
+    assert www["fingerprints"] == []
+    assert [c["url"] for c in fake.calls] == [
+        f"https://{DOMAIN}/",
+        f"https://www.{DOMAIN}/",
+    ]
+
+
+def test_web_posture_partial_on_www_timeout(monkeypatch):
+    pages = {
+        f"https://{DOMAIN}/": (200, {"server": "nginx"}, APEX_HTML),
+        f"https://www.{DOMAIN}/": httpx.ReadTimeout("timed out"),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    out = web_posture.collect(DOMAIN)
+    assert out["status"] == "partial"
+    apex, www = out["hosts"]
+    assert apex["status"] == "ok"
+    assert www["status"] == "error"
+    assert www["error"] == "timeout"
+
+
+def test_web_posture_error_on_www_dns_failure(monkeypatch):
+    pages = {
+        f"https://{DOMAIN}/": (200, {"server": "nginx"}, APEX_HTML),
+        f"https://www.{DOMAIN}/": httpx.ConnectError(
+            "[Errno -2] Name or service not known"
+        ),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    out = web_posture.collect(DOMAIN)
+    assert out["status"] == "partial"
+    www = out["hosts"][1]
+    assert www["status"] == "error"
+    assert www["error"] == "connection failed"
+
+
+def test_ct_503_returns_error_status(monkeypatch):
+    def get(url, timeout=None, **kwargs):
+        request = httpx.Request("GET", url)
+        response = httpx.Response(503, request=request)
+
+        def fail():
+            raise httpx.HTTPStatusError(
+                "unavailable", request=request, response=response
+            )
+
+        return SimpleNamespace(json=lambda: [], raise_for_status=fail)
+
+    monkeypatch.setattr(net, "httpx", SimpleNamespace(get=get))
+    net.begin_run(DOMAIN)
+    out = ct.collect(DOMAIN)
+    assert out["status"] == "error"
+    assert out["error"] == "HTTP 503"
+    assert out["collection_method"] == "ct_log_query"
+    assert out["query_url"] == f"https://crt.sh/?q=%25.{DOMAIN}&output=json"
+
+
+def test_ct_timeout_returns_error_status(monkeypatch):
+    def get(url, timeout=None, **kwargs):
+        raise httpx.ReadTimeout("timed out")
+
+    monkeypatch.setattr(net, "httpx", SimpleNamespace(get=get))
+    net.begin_run(DOMAIN)
+    out = ct.collect(DOMAIN)
+    assert out["status"] == "error"
+    assert out["error"] == "timeout"
+
+
+def test_run_catches_collector_exceptions(monkeypatch):
+    from pe_risk_key.collectors.registry import _REGISTRY
+
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+
+    def boom(domain):
+        raise RuntimeError("kaput")
+
+    register(
+        tool_name="boom_probe", description="x", collection_method="dns_query"
+    )(boom)
+    try:
+        out = run("boom_probe", DOMAIN)
+    finally:
+        _REGISTRY.pop("boom_probe", None)
+    assert out == {
+        "status": "error",
+        "error": "RuntimeError: kaput",
+        "collection_method": "dns_query",
+    }
+
+
+def test_fixture_sections_have_status():
+    sections = [
+        "check_email_auth",
+        "check_dnssec",
+        "enumerate_ct_subdomains",
+        "check_web_posture",
+        "match_known_exploited",
+        "search_public_incidents",
+    ]
+    for name in ("brightwaterfleet.example.json", "copperline.example.json"):
+        data = json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
+        for section in sections:
+            assert data[section]["status"] == "ok", (name, section)
+            assert data[section]["collection_method"], (name, section)
+        for host in data["check_web_posture"]["hosts"]:
+            assert host["status"] == "ok"
+            assert host["status_code"] == 200
+            assert "redirect_location" in host

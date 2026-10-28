@@ -110,6 +110,19 @@
         "counts_toward_findings": true
       }
     ],
-    "disclosed_within_months": 14
+    "disclosed_within_months": 14,
+    "usage": {
+      "searches": 4,
+      "phase1_search": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 800,
+        "cached_tokens": 0
+      },
+      "phase2_extract": {
+        "prompt_tokens": 2500,
+        "completion_tokens": 300,
+        "cached_tokens": 0
+      }
+    }
   }
 }

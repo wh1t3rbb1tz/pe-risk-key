@@ -6,6 +6,7 @@ import ssl
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import dns.resolver
 import httpx
@@ -1125,14 +1126,31 @@ def test_fixture_sections_have_status():
             assert "redirect_location" in host
 
 
-# --- search_public_incidents (mocked Responses API) --------------------------
+# --- search_public_incidents (mocked search + extraction) --------------------
 
 
-def _grounded_response(text, citations):
-    """Fake Responses API response: one web_search_call + cited output_text."""
-    return SimpleNamespace(
-        output=[
-            SimpleNamespace(type="web_search_call", status="completed"),
+def _grounded_response(texts, citations):
+    """Fake Responses API response: one message item per text in ``texts``.
+
+    ``citations`` is a list of (url, title) attached to the LAST message,
+    mirroring a narrated search followed by a cited final answer.
+    """
+    items = [SimpleNamespace(type="web_search_call", status="completed")]
+    for index, text in enumerate(texts):
+        if index == len(texts) - 1:
+            annotations = [
+                SimpleNamespace(
+                    type="url_citation",
+                    url=url,
+                    title=title,
+                    start_index=0,
+                    end_index=1,
+                )
+                for url, title in citations
+            ]
+        else:
+            annotations = []
+        items.append(
             SimpleNamespace(
                 type="message",
                 status="completed",
@@ -1141,51 +1159,61 @@ def _grounded_response(text, citations):
                     SimpleNamespace(
                         type="output_text",
                         text=text,
-                        annotations=[
-                            SimpleNamespace(
-                                type="url_citation",
-                                url=url,
-                                title="source",
-                                start_index=0,
-                                end_index=1,
-                            )
-                            for url in citations
-                        ],
+                        annotations=annotations,
                     )
                 ],
-            ),
-        ]
-    )
+            )
+        )
+    return SimpleNamespace(output=items)
 
 
 class _ScriptedSearchClient:
-    """Fake ModelClient: script maps each query to queued (text, citations).
+    """Fake ModelClient for the two-phase flow.
 
-    A query's script entry may also be an exception, raised on every
-    attempt. Retry attempts (query + appended errors) match by prefix.
+    ``script`` maps each query to queued (texts, citations) pages or an
+    exception; ``extraction`` holds queued phase-2 outputs or an
+    exception. Token bumps make per-phase usage assertions possible.
     """
 
     script: dict = {}
+    extraction: Any = None
     calls: list = []
+    extract_calls: list = []
 
     def __init__(self, role, **kwargs):
         assert role == "public_records", role
+        self.total_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+        }
 
-    def responses_search(self, attempt, *, instructions=None, **kwargs):
-        type(self).calls.append(attempt)
-        for query, pages in type(self).script.items():
-            if attempt == query or attempt.startswith(query + "\n"):
-                if isinstance(pages, Exception):
-                    raise pages
-                text, citations = pages.pop(0)
-                return _grounded_response(text, citations)
-        raise AssertionError(f"unexpected query {attempt!r}")
+    def responses_search(self, query, *, instructions=None, **kwargs):
+        type(self).calls.append(query)
+        self.total_usage["prompt_tokens"] += 10
+        self.total_usage["completion_tokens"] += 5
+        pages = type(self).script[query]
+        if isinstance(pages, Exception):
+            raise pages
+        texts, citations = pages.pop(0)
+        return _grounded_response(texts, citations)
+
+    def chat_json(self, messages, *, schema=None, schema_name="r", **kwargs):
+        type(self).extract_calls.append(messages)
+        self.total_usage["prompt_tokens"] += 100
+        self.total_usage["completion_tokens"] += 20
+        out = type(self).extraction
+        if isinstance(out, Exception):
+            raise out
+        return out.pop(0)
 
 
 @pytest.fixture
 def search_script(monkeypatch):
     _ScriptedSearchClient.script = {}
+    _ScriptedSearchClient.extraction = []
     _ScriptedSearchClient.calls = []
+    _ScriptedSearchClient.extract_calls = []
     monkeypatch.setattr(incidents, "ModelClient", _ScriptedSearchClient)
     monkeypatch.delenv("DEMO_MODE", raising=False)
     return _ScriptedSearchClient
@@ -1213,24 +1241,36 @@ def _incident_result(url, **overrides):
     return result
 
 
-def _empty_script(queries=QUERIES):
+def _quiet_script(queries=QUERIES):
     return {
-        query: [(json.dumps({"results": []}), [])] for query in queries
+        query: [(["No incidents found for this query."], [])]
+        for query in queries
     }
 
 
-def test_incidents_keeps_cited_result(search_script):
+def _extraction_input(search_script):
+    (messages,) = search_script.extract_calls
+    return messages
+
+
+def test_incidents_uses_final_message_and_citations(search_script):
     url = "https://ag.state.example/notices/acme-2025"
-    script = _empty_script()
-    script[QUERIES[0]] = [
-        (json.dumps({"results": [_incident_result(url)]}), [url])
-    ]
+    narration = "I'll search for Acme Corporation breach notices now."
+    final = "Summary: an AG breach notice was filed in August 2025."
+    script = _quiet_script()
+    script[QUERIES[0]] = [([narration, final], [(url, "AG notice")])]
     search_script.script = script
+    search_script.extraction = [{"results": [_incident_result(url)]}]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["collection_method"] == "search_grounding"
     assert out["status"] == "ok"
     assert out["queries_run"] == QUERIES
     assert search_script.calls == QUERIES  # 4-search cap, one call each
+    # Phase 2 saw the final text and the citation, not the narration.
+    user_text = _extraction_input(search_script)[1]["content"]
+    assert final in user_text
+    assert narration not in user_text
+    assert url in user_text
     assert out["dropped_uncited"] == 0
     assert out["dropped_prohibited_source"] == 0
     (kept,) = out["results"]
@@ -1245,43 +1285,44 @@ def test_incidents_keeps_cited_result(search_script):
     )
 
 
-def test_incidents_drops_uncited_result(search_script):
-    script = _empty_script()
-    script[QUERIES[1]] = [
-        (
-            json.dumps(
-                {"results": [_incident_result("https://news.example/acme")]}
-            ),
-            [],
-        )
+def test_incidents_extraction_uses_only_provided_citations(search_script):
+    cited = "https://ag.state.example/notices/acme-cited"
+    invented = "https://news.example/acme-invented"
+    script = _quiet_script()
+    script[QUERIES[0]] = [
+        (["Summary: one notice found."], [(cited, "AG notice")])
     ]
     search_script.script = script
+    search_script.extraction = [
+        {
+            "results": [
+                _incident_result(cited),
+                _incident_result(invented),
+            ]
+        }
+    ]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
-    assert out["results"] == []
+    assert [r["url"] for r in out["results"]] == [cited]
     assert out["dropped_uncited"] == 1
-    assert out["dropped_prohibited_source"] == 0
-    assert out["disclosed_within_months"] is None
     assert out["status"] == "ok"
 
 
 def test_incidents_drops_prohibited_sources(search_script):
     paste = "https://pastebin.com/raw/acme53"
     forum = "https://breachforums.example/thread/9"
-    script = _empty_script()
+    script = _quiet_script()
     script[QUERIES[0]] = [
-        (
-            json.dumps(
-                {
-                    "results": [
-                        _incident_result(paste),
-                        _incident_result(forum),
-                    ]
-                }
-            ),
-            [paste, forum],
-        )
+        (["Summary: two dumps found."], [(paste, "p"), (forum, "f")])
     ]
     search_script.script = script
+    search_script.extraction = [
+        {
+            "results": [
+                _incident_result(paste),
+                _incident_result(forum),
+            ]
+        }
+    ]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["results"] == []
     assert out["dropped_prohibited_source"] == 2
@@ -1299,11 +1340,15 @@ def test_incidents_uncertain_match_not_counted(search_script):
         entity_match="uncertain",
         match_basis="Same name, different state; could be another Acme.",
     )
-    script = _empty_script()
+    script = _quiet_script()
     script[QUERIES[0]] = [
-        (json.dumps({"results": [old, new]}), [old["url"], new["url"]])
+        (
+            ["Summary: two possible incidents."],
+            [(old["url"], "AG"), (new["url"], "press")],
+        )
     ]
     search_script.script = script
+    search_script.extraction = [{"results": [old, new]}]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert len(out["results"]) == 2
     uncertain = next(
@@ -1324,79 +1369,96 @@ def test_incidents_domain_fallback_and_query_cap(search_script):
         f"{DOMAIN} 8-K Item 1.05 cybersecurity incident",
         f"{DOMAIN} breach notice attorney general",
     ]
-    search_script.script = _empty_script(expected)
+    search_script.script = _quiet_script(expected)
+    search_script.extraction = [{"results": []}]
     out = incidents.collect(DOMAIN)
     assert out["queries_run"] == expected
     assert len(search_script.calls) == 4
+    assert len(search_script.extract_calls) == 1  # one extraction call
 
 
 def test_incidents_empty_results_is_ok(search_script):
-    search_script.script = _empty_script()
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["status"] == "ok"
     assert out["results"] == []
     assert out["disclosed_within_months"] is None
 
 
-def test_incidents_retries_invalid_json_once(search_script):
-    url = "https://ag.state.example/notices/acme-retry"
-    script = _empty_script()
-    script[QUERIES[2]] = [
-        ("not json at all", []),
-        (json.dumps({"results": [_incident_result(url)]}), [url]),
-    ]
-    search_script.script = script
-    out = incidents.collect(DOMAIN, company_name=COMPANY)
-    assert [r["url"] for r in out["results"]] == [url]
-    # One retry inside the same search; still 4 searches run.
-    assert len(search_script.calls) == 5
-    assert out["queries_run"] == QUERIES
-    assert out["status"] == "ok"
-
-
-def test_incidents_impossible_date_triggers_retry(search_script):
-    url = "https://ag.state.example/notices/acme-date"
-    script = _empty_script()
-    script[QUERIES[0]] = [
-        (
-            json.dumps(
-                {"results": [_incident_result(url, date="2025-13-99")]}
-            ),
-            [url],
-        ),
-        (json.dumps({"results": [_incident_result(url)]}), [url]),
-    ]
-    search_script.script = script
-    out = incidents.collect(DOMAIN, company_name=COMPANY)
-    assert [r["url"] for r in out["results"]] == [url]
-    assert out["disclosed_within_months"] is not None
-
-
-def test_incidents_invalid_json_twice_fails_query(search_script):
-    script = _empty_script()
-    script[QUERIES[0]] = [("nope", []), ("still nope", [])]
-    search_script.script = script
-    out = incidents.collect(DOMAIN, company_name=COMPANY)
-    assert out["status"] == "partial"
-    assert out["results"] == []
-
-
-def test_incidents_failed_query_degrades_gracefully(search_script):
-    script = _empty_script()
+def test_incidents_partial_when_one_search_fails(search_script):
+    script = _quiet_script()
     script[QUERIES[0]] = RuntimeError("boom")
     search_script.script = script
+    search_script.extraction = [{"results": []}]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["status"] == "partial"
     assert out["queries_run"] == QUERIES
+    # Extraction still ran over the three surviving summaries.
+    assert len(search_script.extract_calls) == 1
+
+
+def test_incidents_error_when_all_searches_fail(search_script):
     search_script.script = {query: RuntimeError("down") for query in QUERIES}
+    search_script.extraction = [{"results": []}]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "error"
+    assert out["results"] == []
+    assert out["disclosed_within_months"] is None
+    assert search_script.extract_calls == []  # nothing to extract from
+    assert out["usage"]["phase2_extract"] == {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+    }
+
+
+def test_incidents_error_when_extraction_fails(search_script):
+    search_script.script = _quiet_script()
+    search_script.extraction = ValueError("bad output twice")
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["status"] == "error"
     assert out["results"] == []
     assert out["disclosed_within_months"] is None
 
 
+def test_incidents_reports_per_phase_usage(search_script):
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "ok"
+    assert out["usage"] == {
+        "searches": 4,
+        "phase1_search": {
+            "prompt_tokens": 40,
+            "completion_tokens": 20,
+            "cached_tokens": 0,
+        },
+        "phase2_extract": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "cached_tokens": 0,
+        },
+    }
+
+
+def test_incidents_drops_invalid_date(search_script):
+    url = "https://ag.state.example/notices/acme-date"
+    script = _quiet_script()
+    script[QUERIES[0]] = [(["Summary: one notice."], [(url, "AG")])]
+    search_script.script = script
+    search_script.extraction = [
+        {"results": [_incident_result(url, date="2025-13-99")]}
+    ]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["results"] == []
+    assert out["disclosed_within_months"] is None
+    assert out["status"] == "ok"
+
+
 def test_run_passes_company_name_to_incidents(search_script):
-    search_script.script = _empty_script()
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
     out = run("search_public_incidents", DOMAIN, company_name=COMPANY)
     assert out["queries_run"] == QUERIES
 

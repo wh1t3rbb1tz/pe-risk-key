@@ -69,6 +69,19 @@
     "dropped_uncited": 0,
     "dropped_prohibited_source": 0,
     "results": [],
-    "disclosed_within_months": null
+    "disclosed_within_months": null,
+    "usage": {
+      "searches": 4,
+      "phase1_search": {
+        "prompt_tokens": 1100,
+        "completion_tokens": 400,
+        "cached_tokens": 0
+      },
+      "phase2_extract": {
+        "prompt_tokens": 1800,
+        "completion_tokens": 50,
+        "cached_tokens": 0
+      }
+    }
   }
 }

@@ -377,6 +377,59 @@ def test_chat_json_retries_once_on_invalid_output(monkeypatch):
     assert messages == [{"role": "user", "content": "hi"}]  # not mutated
 
 
+def test_chat_json_salvages_last_json_object(monkeypatch):
+    client = _client()
+    calls: list = []
+
+    def fake_create(*, messages, **kwargs):
+        calls.append(messages)
+        return _chat_response(
+            "I'll search now.\n"
+            'Progress note: {"seen": true}.\n'
+            'Final: {"a": "salvaged"} (done)'
+        )
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    result = client.chat_json(
+        [{"role": "user", "content": "hi"}],
+        schema=THING_SCHEMA,
+        schema_name="T",
+    )
+    assert result == {"a": "salvaged"}
+    assert len(calls) == 1  # salvaged, no retry needed
+
+
+def test_salvage_last_json_object_picks_last_top_level():
+    salvage = ModelClient._salvage_last_json_object
+    assert salvage('x {"inner": {"a": 1}} y {"a": "last"} tail') == {
+        "a": "last"
+    }
+    assert salvage("no braces here") is None
+    assert salvage("array only [1, 2]") is None
+
+
+def test_chat_json_salvaged_but_invalid_still_retries(monkeypatch):
+    client = _client()
+    calls: list = []
+    contents = [
+        'Working on it… {"b": "wrong shape"}',
+        '{"a": "fixed"}',
+    ]
+
+    def fake_create(*, messages, **kwargs):
+        calls.append(messages)
+        return _chat_response(contents[len(calls) - 1])
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    result = client.chat_json(
+        [{"role": "user", "content": "hi"}],
+        schema=THING_SCHEMA,
+        schema_name="T",
+    )
+    assert result == {"a": "fixed"}
+    assert len(calls) == 2
+
+
 def test_chat_json_raises_after_second_failure(monkeypatch):
     client = _client()
     calls: list = []

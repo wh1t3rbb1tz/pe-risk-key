@@ -74,6 +74,10 @@ ROLE_MODELS: dict[str, str] = {
 _RETRYABLE_STATUS = 429
 _TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 
+# Sentinel for "content held no parseable JSON at all" (distinct from a
+# parsed JSON null, which still goes through schema validation).
+_UNPARSED: Any = object()
+
 
 class ModelClient:
     """Thin wrapper around the OpenAI SDK with role/mode routing and 429 retry.
@@ -332,6 +336,36 @@ class ModelClient:
         self._accumulate_usage(response)
         return response
 
+    @staticmethod
+    def _salvage_last_json_object(content: str) -> dict | None:
+        """Last top-level ``{...}`` in ``content`` that parses, if any.
+
+        Scans every ``{`` as a candidate start; a candidate counts as
+        top-level when no other candidate's span strictly contains it.
+        Returns the rightmost top-level object, else ``None``.
+        """
+        decoder = json.JSONDecoder()
+        spans: list[tuple[int, int, dict]] = []
+        for start in range(len(content)):
+            if content[start] != "{":
+                continue
+            try:
+                obj, end = decoder.raw_decode(content, start)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                spans.append((start, end, obj))
+        top_level = [
+            span
+            for span in spans
+            if not any(
+                other[0] < span[0] and span[1] <= other[1]
+                for other in spans
+                if other is not span
+            )
+        ]
+        return top_level[-1][2] if top_level else None
+
     def chat_json(
         self,
         messages: list[dict[str, Any]],
@@ -348,9 +382,11 @@ class ModelClient:
         via ``response_format={"type": "json_schema", ...}`` with
         ``strict: true``, validates the parsed response against ``schema``,
         and retries once with the validation errors appended on failure.
-        Raises the validation error if the second attempt also fails.
-        Without ``schema``, falls back to unconstrained ``json_object``.
-        ``reasoning_effort`` passes through to :meth:`chat`.
+        If an attempt's content is not pure JSON, the last top-level
+        JSON object is salvaged and validated before counting it a
+        failure. Raises the validation error if the second attempt also
+        fails. Without ``schema``, falls back to unconstrained
+        ``json_object``. ``reasoning_effort`` passes through to :meth:`chat`.
         """
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
@@ -369,15 +405,26 @@ class ModelClient:
             response = self.chat(attempt_messages, **kwargs)
             content = response.choices[0].message.content
             try:
-                parsed = json.loads(content)
+                parsed: Any = json.loads(content)
             except json.JSONDecodeError:
+                # Defensive: narration around the JSON ("I'll search…")
+                # fails strict parsing, so try the last top-level JSON
+                # object in the content before counting this a failure.
+                salvaged = self._salvage_last_json_object(content)
+                if salvaged is None:
+                    unparsed: Any = _UNPARSED
+                else:
+                    unparsed = salvaged
+            else:
+                unparsed = parsed
+            if unparsed is _UNPARSED:
                 errors = [f"(invalid JSON): {content[:200]}"]
             else:
                 failures = sorted(
-                    validator.iter_errors(parsed), key=lambda e: e.json_path
+                    validator.iter_errors(unparsed), key=lambda e: e.json_path
                 )
                 if not failures:
-                    return parsed
+                    return unparsed
                 errors = [f"{e.json_path}: {e.message}" for e in failures]
                 if attempt == 1:
                     raise failures[0]

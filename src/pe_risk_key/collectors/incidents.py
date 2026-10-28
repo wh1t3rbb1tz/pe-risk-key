@@ -1,14 +1,32 @@
-"""search_public_incidents collector: grounded public-records search."""
+"""search_public_incidents collector: grounded search + strict extraction.
+
+Two phases, because single-shot structured output fails when the
+web_search tool is active: the model emits progress narration
+("I'll search…") around the JSON, so strict parsing fails twice and
+the query errors. Docs notes (https://dev.meta.ai/docs/search-grounding,
+https://dev.meta.ai/docs/structured-output):
+
+- ``response_format`` is Chat Completions-only while web_search is
+  Responses/Messages-only; the params cannot combine across endpoints.
+  The Responses-side ``text.format`` + web_search combination is
+  undocumented, so narration-safe parsing is not guaranteed.
+- Responses examples show a single message item; narration is not
+  documented as separate output items. Defensively, the LAST message
+  item is treated as the final answer.
+
+Phase 1 (search): one Responses API call per query with web_search,
+asking for a plain-text incident summary. Captures the final answer
+text plus the full citation list (URL + title).
+Phase 2 (extract): one chat_json call (no tools, strict json_schema)
+over the phase-1 texts and the union of citations.
+"""
 
 from __future__ import annotations
 
-import json
 import re
 import sys
 from datetime import date
 from typing import Any
-
-import jsonschema
 
 from pe_risk_key.collectors.registry import register
 from pe_risk_key.providers import ModelClient
@@ -114,6 +132,8 @@ INPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
+_USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cached_tokens")
+
 
 def _queries(company: str, domain: str) -> list[str]:
     return [
@@ -124,28 +144,68 @@ def _queries(company: str, domain: str) -> list[str]:
     ]
 
 
-def _instructions(company: str, domain: str) -> str:
-    types = ", ".join(RESULT_TYPES)
+def _search_instructions(company: str, domain: str) -> str:
     return (
-        f"You report publicly disclosed security incidents involving "
-        f"{company} ({domain}).\n"
+        f"You are looking up publicly disclosed security incidents "
+        f"involving {company} ({domain}).\n"
         f"Today's date is {date.today().isoformat()}.\n"
-        "Rules:\n"
-        "- Report only incidents involving the named company. If a result "
-        'might be a different company with a similar name, set '
-        'entity_match to "uncertain" and explain in match_basis.\n'
-        '- If you found nothing, return {"results": []}. No results is a '
-        "valid, expected outcome.\n"
-        '- Return ONLY JSON of the form {"results": [...]} with no other '
-        "text. Each result has:\n"
-        f"  - type: one of {types}\n"
-        "  - date: disclosure date as YYYY-MM-DD\n"
-        "  - summary: one or two sentences\n"
-        "  - url: the source page URL\n"
-        "  - entity_match: exact | probable | uncertain\n"
-        "  - match_basis: why you believe this is the same company\n"
-        "- Every url must be a page you actually cite. Do not invent URLs."
+        "Summarize in plain text any security incidents involving the "
+        "named company: data breaches, breach notifications, SEC 8-K "
+        "Item 1.05 filings, regulator actions, press-covered incidents, "
+        "or company statements. Cite every source you rely on.\n"
+        "Report only incidents involving the named company; if a result "
+        "might be a different company with a similar name, say so.\n"
+        "If you found nothing, say that plainly. No results is a valid, "
+        "expected outcome."
     )
+
+
+def _extract_messages(
+    texts: list[tuple[str, str]], citations: list[tuple[str, str]]
+) -> list[dict[str, str]]:
+    types = ", ".join(RESULT_TYPES)
+    summaries = "\n\n".join(
+        f"Query: {query}\nSummary:\n{text}" for query, text in texts
+    )
+    if citations:
+        cite_lines = "\n".join(
+            f"- {url} ({title})" if title else f"- {url}"
+            for url, title in citations
+        )
+    else:
+        cite_lines = "(no citations)"
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You extract publicly disclosed security incidents "
+                "from grounded search summaries.\n"
+                f"Today's date is {date.today().isoformat()}.\n"
+                "Rules:\n"
+                '- Return ONLY JSON of the form {"results": [...]}. '
+                "Each result has:\n"
+                f"  - type: one of {types}\n"
+                "  - date: disclosure date as YYYY-MM-DD\n"
+                "  - summary: one or two sentences\n"
+                "  - url: copied EXACTLY from the citation list below\n"
+                "  - entity_match: exact | probable | uncertain\n"
+                "  - match_basis: why you believe this is the same "
+                "company\n"
+                "- Use only URLs from the citation list below. Never "
+                "invent, shorten, or modify a URL.\n"
+                "- If the summaries report no incidents involving the "
+                'named company, return {"results": []}.'
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Search summaries:\n{summaries}\n\n"
+                "Citations (the only URLs you may use):\n"
+                f"{cite_lines}"
+            ),
+        },
+    ]
 
 
 def _field(obj: Any, name: str) -> Any:
@@ -154,56 +214,37 @@ def _field(obj: Any, name: str) -> Any:
     return getattr(obj, name, None)
 
 
-def _extract_text_and_citations(response: Any) -> tuple[str, set[str]]:
-    """Concatenated output_text plus url_citation URLs.
+def _extract_final_text_and_citations(
+    response: Any,
+) -> tuple[str, list[tuple[str, str]]]:
+    """Final message text plus ordered unique (url, title) citations.
 
     Per https://dev.meta.ai/docs/search-grounding, grounded answers
-    attach ``url_citation`` annotations (``url``, ``title``,
-    ``start_index``, ``end_index``) to ``output_text`` blocks; those
-    annotations are the subset of sources the model actually cited.
+    attach ``url_citation`` annotations to ``output_text`` blocks. The
+    docs show a single message item and say nothing about narration as
+    separate items, so the LAST message item is the final answer while
+    citations union across every message item.
     """
-    texts: list[str] = []
-    citations: set[str] = set()
+    message_texts: list[str] = []
+    citations: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for item in _field(response, "output") or []:
         if _field(item, "type") != "message":
             continue
+        blocks: list[str] = []
         for block in _field(item, "content") or []:
             if _field(block, "type") != "output_text":
                 continue
-            texts.append(_field(block, "text") or "")
+            blocks.append(_field(block, "text") or "")
             for annotation in _field(block, "annotations") or []:
                 if _field(annotation, "type") == "url_citation":
                     url = _field(annotation, "url")
-                    if url:
-                        citations.add(url)
-    return "\n".join(texts), citations
-
-
-def _strip_fences(text: str) -> str:
-    match = re.search(
-        r"```(?:json)?\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL
-    )
-    return match.group(1) if match else text.strip()
-
-
-def _validation_errors(parsed: Any) -> list[str]:
-    validator = jsonschema.Draft202012Validator(RESULTS_SCHEMA)
-    errors = [
-        f"{e.json_path}: {e.message}"
-        for e in sorted(
-            validator.iter_errors(parsed), key=lambda e: e.json_path
-        )
-    ]
-    if not errors and isinstance(parsed, dict):
-        for index, result in enumerate(parsed.get("results", [])):
-            try:
-                date.fromisoformat(result["date"])
-            except (ValueError, TypeError, KeyError):
-                errors.append(
-                    f"$.results[{index}].date: "
-                    f"{result.get('date')!r} is not a calendar date"
-                )
-    return errors
+                    if url and url not in seen:
+                        seen.add(url)
+                        citations.append((url, _field(annotation, "title") or ""))
+        message_texts.append("\n".join(blocks))
+    text = message_texts[-1] if message_texts else ""
+    return text, citations
 
 
 def _months_since(iso_day: str, today: date) -> int:
@@ -224,37 +265,15 @@ def _log_drop(kind: str, url: str) -> None:
     )
 
 
-def _collect_query(
-    client: ModelClient, query: str, prompt: str
-) -> tuple[list[dict], set[str]]:
-    """Run one grounded query; retry once on invalid JSON. May raise."""
-    attempt_input = query
-    citations: set[str] = set()
-    for attempt in range(2):
-        response = client.responses_search(
-            attempt_input, instructions=prompt
-        )
-        text, citations = _extract_text_and_citations(response)
-        try:
-            parsed = json.loads(_strip_fences(text))
-        except json.JSONDecodeError:
-            errors = [f"(invalid JSON): {text[:200]}"]
-        else:
-            errors = _validation_errors(parsed)
-            if not errors:
-                return parsed["results"], citations
-        if attempt == 1:
-            raise ValueError(
-                "Second structured-output attempt failed validation: "
-                + "; ".join(errors[:5])
-            )
-        attempt_input = (
-            f"{query}\n\nYour previous response did not match the "
-            "required JSON schema:\n"
-            + "\n".join(f"- {e}" for e in errors[:10])
-            + "\nReturn only corrected JSON matching the schema."
-        )
-    raise AssertionError("unreachable")  # pragma: no cover
+def _empty_usage() -> dict[str, int]:
+    return {field: 0 for field in _USAGE_FIELDS}
+
+
+def _usage_delta(before: dict, after: dict) -> dict[str, int]:
+    return {
+        field: after.get(field, 0) - before.get(field, 0)
+        for field in _USAGE_FIELDS
+    }
 
 
 @register(
@@ -268,26 +287,32 @@ def _collect_query(
     input_schema=INPUT_SCHEMA,
 )
 def collect(domain: str, company_name: str | None = None) -> dict:
-    """Collect public incident disclosures via grounded model searches.
+    """Collect public incident disclosures: search, then strict extraction.
 
-    Runs at most ``MAX_SEARCHES_PER_RUN`` searches, keeps only cited
-    results from allowed sources, and computes
-    ``disclosed_within_months`` in code. A failed query degrades to
-    ``partial`` (``error`` when every query failed) rather than raising.
+    Phase 1 runs at most ``MAX_SEARCHES_PER_RUN`` grounded searches and
+    keeps each final answer text plus its citations. Phase 2 extracts
+    ``results[]`` from those texts in a single strict-schema call, using
+    only cited URLs. ``disclosed_within_months`` is computed in code.
+
+    Status is ``ok`` when extraction succeeded (even with zero
+    results), ``partial`` when some phase-1 queries failed, and
+    ``error`` when every phase-1 query failed or extraction failed.
     """
     company = company_name or domain
     client = ModelClient(role="public_records")
-    prompt = _instructions(company, domain)
     queries = _queries(company, domain)[:MAX_SEARCHES_PER_RUN]
 
-    results: list[dict] = []
-    seen: set[str] = set()
-    dropped_uncited = 0
-    dropped_prohibited = 0
+    usage_before = dict(client.total_usage)
+    texts: list[tuple[str, str]] = []
+    citations: list[tuple[str, str]] = []
+    seen_citations: set[str] = set()
     failed = 0
     for query in queries:
         try:
-            found, citations = _collect_query(client, query, prompt)
+            response = client.responses_search(
+                query,
+                instructions=_search_instructions(company, domain),
+            )
         except Exception as exc:  # one bad query must not kill the run
             failed += 1
             print(
@@ -295,54 +320,98 @@ def collect(domain: str, company_name: str | None = None) -> dict:
                 file=sys.stderr,
             )
             continue
-        cited = {_normalize_url(url) for url in citations}
-        for result in found:
-            url = _normalize_url(result["url"])
-            if url not in cited and result["url"] not in citations:
-                dropped_uncited += 1
-                _log_drop("dropped_uncited", result["url"])
-                continue
-            if any(pattern.search(url) for pattern in _PROHIBITED):
-                dropped_prohibited += 1
-                _log_drop("dropped_prohibited_source", result["url"])
-                continue
-            if url in seen:
-                continue
-            seen.add(url)
-            counted = result["entity_match"] in ("exact", "probable")
-            results.append(
-                {
-                    "type": result["type"],
-                    "date": result["date"],
-                    "summary": result["summary"],
-                    "url": result["url"],
-                    "locator": result["url"],
-                    "entity_match": result["entity_match"],
-                    "match_basis": result["match_basis"],
-                    "counts_toward_findings": counted,
-                }
-            )
+        text, cites = _extract_final_text_and_citations(response)
+        texts.append((query, text))
+        for url, title in cites:
+            if url not in seen_citations:
+                seen_citations.add(url)
+                citations.append((url, title))
+    phase1_usage = _usage_delta(usage_before, client.total_usage)
+
+    def _base(status: str, phase2_usage: dict) -> dict:
+        return {
+            "collection_method": COLLECTION_METHOD,
+            "status": status,
+            "queries_run": queries,
+            "dropped_uncited": 0,
+            "dropped_prohibited_source": 0,
+            "results": [],
+            "disclosed_within_months": None,
+            "usage": {
+                "searches": len(queries),
+                "phase1_search": phase1_usage,
+                "phase2_extract": phase2_usage,
+            },
+        }
+
+    if failed == len(queries):
+        return _base("error", _empty_usage())
+
+    extract_before = dict(client.total_usage)
+    try:
+        extracted = client.chat_json(
+            _extract_messages(texts, citations),
+            schema=RESULTS_SCHEMA,
+            schema_name="incident_results",
+        )
+        found = extracted["results"]
+    except Exception as exc:
+        print(
+            f"[search_public_incidents] extraction failed ({exc})",
+            file=sys.stderr,
+        )
+        return _base("error", _usage_delta(extract_before, client.total_usage))
+    phase2_usage = _usage_delta(extract_before, client.total_usage)
+
+    cited = {_normalize_url(url) for url, _ in citations}
+    raw_cited = {url for url, _ in citations}
+    results: list[dict] = []
+    seen: set[str] = set()
+    dropped_uncited = 0
+    dropped_prohibited = 0
+    for result in found:
+        try:
+            date.fromisoformat(result["date"])
+        except (ValueError, TypeError, KeyError):
+            _log_drop("dropped_invalid_date", str(result.get("url")))
+            continue
+        url = _normalize_url(result["url"])
+        if url not in cited and result["url"] not in raw_cited:
+            dropped_uncited += 1
+            _log_drop("dropped_uncited", result["url"])
+            continue
+        if any(pattern.search(url) for pattern in _PROHIBITED):
+            dropped_prohibited += 1
+            _log_drop("dropped_prohibited_source", result["url"])
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        counted = result["entity_match"] in ("exact", "probable")
+        results.append(
+            {
+                "type": result["type"],
+                "date": result["date"],
+                "summary": result["summary"],
+                "url": result["url"],
+                "locator": result["url"],
+                "entity_match": result["entity_match"],
+                "match_basis": result["match_basis"],
+                "counts_toward_findings": counted,
+            }
+        )
 
     today = date.today()
     counted_dates = [
         result["date"] for result in results if result["counts_toward_findings"]
     ]
-    if failed == len(queries):
-        status = "error"
-    elif failed:
-        status = "partial"
-    else:
-        status = "ok"
-    return {
-        "collection_method": COLLECTION_METHOD,
-        "status": status,
-        "queries_run": queries,
-        "dropped_uncited": dropped_uncited,
-        "dropped_prohibited_source": dropped_prohibited,
-        "results": results,
-        "disclosed_within_months": (
-            min(_months_since(day, today) for day in counted_dates)
-            if counted_dates
-            else None
-        ),
-    }
+    out = _base("partial" if failed else "ok", phase2_usage)
+    out["dropped_uncited"] = dropped_uncited
+    out["dropped_prohibited_source"] = dropped_prohibited
+    out["results"] = results
+    out["disclosed_within_months"] = (
+        min(_months_since(day, today) for day in counted_dates)
+        if counted_dates
+        else None
+    )
+    return out

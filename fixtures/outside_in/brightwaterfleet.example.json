@@ -90,11 +90,13 @@
   "search_public_incidents": {
     "collection_method": "search_grounding",
     "status": "ok",
+    "reason": null,
+    "cached": false,
     "queries_run": [
-      "Brightwater Fleet Systems, Inc. data breach",
-      "Brightwater Fleet Systems, Inc. security incident notification",
       "Brightwater Fleet Systems, Inc. 8-K Item 1.05 cybersecurity incident",
-      "brightwaterfleet.example breach notice attorney general"
+      "brightwaterfleet.example breach notice attorney general",
+      "Brightwater Fleet Systems, Inc. security incident notification",
+      "Brightwater Fleet Systems, Inc. data breach"
     ],
     "dropped_uncited": 0,
     "dropped_prohibited_source": 0,
@@ -122,7 +124,8 @@
         "prompt_tokens": 2500,
         "completion_tokens": 300,
         "cached_tokens": 0
-      }
+      },
+      "estimated_cost_usd": 0.0193
     }
   }
 }

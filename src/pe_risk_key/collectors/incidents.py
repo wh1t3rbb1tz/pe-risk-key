@@ -23,9 +23,13 @@ over the phase-1 texts and the union of citations.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from pe_risk_key.collectors.registry import register
@@ -35,6 +39,17 @@ COLLECTION_METHOD = "search_grounding"
 
 # Cost control: the four fixed queries below are the whole run.
 MAX_SEARCHES_PER_RUN = 4
+
+ROOT = Path(__file__).resolve().parents[3]
+CACHE_DIR = ROOT / ".cache" / "public_incidents"
+CACHE_TTL_SECONDS = 7 * 24 * 3600
+
+DEFAULT_MAX_INPUT_TOKENS = 250_000
+
+# Standard-mode Muse Spark prices per 1M tokens, plus the web_search
+# surcharge, per https://dev.meta.ai/docs/pricing-rate-limits.
+SPARK_USD_PER_MTOK = {"input": 1.25, "cached": 0.15, "output": 4.25}
+SEARCH_USD_PER_SEARCH = 2.50 / 1000
 
 RESULT_TYPES = (
     "sec_8k_item_105",
@@ -136,11 +151,13 @@ _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "cached_tokens")
 
 
 def _queries(company: str, domain: str) -> list[str]:
+    # Ordered by value: primary-source queries first, so a token budget
+    # cuts the lowest-value queries first.
     return [
-        f"{company} data breach",
-        f"{company} security incident notification",
         f"{company} 8-K Item 1.05 cybersecurity incident",
         f"{domain} breach notice attorney general",
+        f"{company} security incident notification",
+        f"{company} data breach",
     ]
 
 
@@ -193,6 +210,12 @@ def _extract_messages(
                 "company\n"
                 "- Use only URLs from the citation list below. Never "
                 "invent, shorten, or modify a URL.\n"
+                "- Prefer primary sources (SEC filings, state AG "
+                "notices, regulator actions, company statements) over "
+                "press reports. When both describe the same incident, "
+                "output the primary source only, and set type from the "
+                "source, not the topic. Each distinct incident appears "
+                "once.\n"
                 "- If the summaries report no incidents involving the "
                 'named company, return {"results": []}.'
             ),
@@ -276,6 +299,74 @@ def _usage_delta(before: dict, after: dict) -> dict[str, int]:
     }
 
 
+def _estimated_cost_usd(
+    phase1: dict, phase2: dict, searches: int
+) -> float:
+    prompt = phase1["prompt_tokens"] + phase2["prompt_tokens"]
+    cached = phase1["cached_tokens"] + phase2["cached_tokens"]
+    completion = (
+        phase1["completion_tokens"] + phase2["completion_tokens"]
+    )
+    billable_input = max(0, prompt - cached)
+    return round(
+        billable_input / 1e6 * SPARK_USD_PER_MTOK["input"]
+        + cached / 1e6 * SPARK_USD_PER_MTOK["cached"]
+        + completion / 1e6 * SPARK_USD_PER_MTOK["output"]
+        + searches * SEARCH_USD_PER_SEARCH,
+        6,
+    )
+
+
+def _cache_path(domain: str, company_name: str | None) -> Path:
+    digest = hashlib.sha256(
+        f"{domain}{company_name or ''}".encode("utf-8")
+    ).hexdigest()
+    return CACHE_DIR / f"{digest}.json"
+
+
+def _read_cache(path: Path) -> dict | None:
+    """Cached output when the entry exists and is within TTL, else None."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        age = (
+            datetime.now(timezone.utc)
+            - datetime.fromisoformat(payload["cached_at"])
+        ).total_seconds()
+    except (OSError, ValueError, KeyError):
+        return None
+    if age > CACHE_TTL_SECONDS:
+        return None
+    output = payload.get("output")
+    return output if isinstance(output, dict) else None
+
+
+def _write_cache(path: Path, output: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "cached_at": datetime.now(timezone.utc).isoformat(),
+                    "output": output,
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(
+            f"[search_public_incidents] cache write failed ({exc})",
+            file=sys.stderr,
+        )
+
+
+def _max_input_tokens() -> int:
+    return int(
+        os.getenv(
+            "PUBLIC_RECORDS_MAX_INPUT_TOKENS", str(DEFAULT_MAX_INPUT_TOKENS)
+        )
+    )
+
+
 @register(
     tool_name="search_public_incidents",
     description=(
@@ -286,32 +377,63 @@ def _usage_delta(before: dict, after: dict) -> dict[str, int]:
     collection_method=COLLECTION_METHOD,
     input_schema=INPUT_SCHEMA,
 )
-def collect(domain: str, company_name: str | None = None) -> dict:
+def collect(
+    domain: str,
+    company_name: str | None = None,
+    force_refresh: bool = False,
+) -> dict:
     """Collect public incident disclosures: search, then strict extraction.
 
-    Phase 1 runs at most ``MAX_SEARCHES_PER_RUN`` grounded searches and
+    Phase 1 runs at most ``MAX_SEARCHES_PER_RUN`` grounded searches
+    (``muse-spark-1.3``, standard mode, minimal search context) and
     keeps each final answer text plus its citations. Phase 2 extracts
     ``results[]`` from those texts in a single strict-schema call, using
     only cited URLs. ``disclosed_within_months`` is computed in code.
 
+    Successful outputs are cached for 7 days; a cache hit returns with
+    ``"cached": true`` and makes no API calls. ``force_refresh``
+    bypasses the cache read. Phase-1 input tokens are capped by
+    ``PUBLIC_RECORDS_MAX_INPUT_TOKENS``; once exceeded, remaining
+    queries are skipped and the run is ``partial`` with reason
+    ``token_budget``.
+
     Status is ``ok`` when extraction succeeded (even with zero
-    results), ``partial`` when some phase-1 queries failed, and
-    ``error`` when every phase-1 query failed or extraction failed.
+    results), ``partial`` when some phase-1 queries failed or the
+    budget cut the run short, and ``error`` when every phase-1 query
+    failed or extraction failed.
     """
     company = company_name or domain
+    cache_path = _cache_path(domain, company_name)
+    if not force_refresh:
+        cached = _read_cache(cache_path)
+        if cached is not None:
+            return {**cached, "cached": True}
+
     client = ModelClient(role="public_records")
     queries = _queries(company, domain)[:MAX_SEARCHES_PER_RUN]
+    max_input_tokens = _max_input_tokens()
 
     usage_before = dict(client.total_usage)
+    attempted: list[str] = []
     texts: list[tuple[str, str]] = []
     citations: list[tuple[str, str]] = []
     seen_citations: set[str] = set()
     failed = 0
-    for query in queries:
+    phase1_input_tokens = 0
+    budget_hit = False
+    for index, query in enumerate(queries):
+        attempted.append(query)
+        tokens_before = client.total_usage["prompt_tokens"]
         try:
             response = client.responses_search(
                 query,
                 instructions=_search_instructions(company, domain),
+                # Minimal retrieved context: lowest token usage; the
+                # docs' most restrictive fetch option. Citations are
+                # annotations on the answer text, unaffected.
+                tools=[
+                    {"type": "web_search", "search_context_size": "low"}
+                ],
             )
         except Exception as exc:  # one bad query must not kill the run
             failed += 1
@@ -320,31 +442,48 @@ def collect(domain: str, company_name: str | None = None) -> dict:
                 file=sys.stderr,
             )
             continue
+        phase1_input_tokens += (
+            client.total_usage["prompt_tokens"] - tokens_before
+        )
         text, cites = _extract_final_text_and_citations(response)
         texts.append((query, text))
         for url, title in cites:
             if url not in seen_citations:
                 seen_citations.add(url)
                 citations.append((url, title))
+        if phase1_input_tokens > max_input_tokens and index + 1 < len(queries):
+            budget_hit = True
+            print(
+                f"[search_public_incidents] token budget exceeded "
+                f"({phase1_input_tokens} > {max_input_tokens}); skipping "
+                f"{len(queries) - index - 1} remaining queries",
+                file=sys.stderr,
+            )
+            break
     phase1_usage = _usage_delta(usage_before, client.total_usage)
 
     def _base(status: str, phase2_usage: dict) -> dict:
         return {
             "collection_method": COLLECTION_METHOD,
             "status": status,
-            "queries_run": queries,
+            "reason": "token_budget" if budget_hit else None,
+            "cached": False,
+            "queries_run": attempted,
             "dropped_uncited": 0,
             "dropped_prohibited_source": 0,
             "results": [],
             "disclosed_within_months": None,
             "usage": {
-                "searches": len(queries),
+                "searches": len(attempted),
                 "phase1_search": phase1_usage,
                 "phase2_extract": phase2_usage,
+                "estimated_cost_usd": _estimated_cost_usd(
+                    phase1_usage, phase2_usage, len(attempted)
+                ),
             },
         }
 
-    if failed == len(queries):
+    if failed == len(attempted):
         return _base("error", _empty_usage())
 
     extract_before = dict(client.total_usage)
@@ -405,7 +544,8 @@ def collect(domain: str, company_name: str | None = None) -> dict:
     counted_dates = [
         result["date"] for result in results if result["counts_toward_findings"]
     ]
-    out = _base("partial" if failed else "ok", phase2_usage)
+    status = "partial" if (failed or budget_hit) else "ok"
+    out = _base(status, phase2_usage)
     out["dropped_uncited"] = dropped_uncited
     out["dropped_prohibited_source"] = dropped_prohibited
     out["results"] = results
@@ -414,4 +554,6 @@ def collect(domain: str, company_name: str | None = None) -> dict:
         if counted_dates
         else None
     )
+    if status == "ok":
+        _write_cache(cache_path, out)
     return out

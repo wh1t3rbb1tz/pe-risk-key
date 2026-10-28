@@ -60,11 +60,13 @@
   "search_public_incidents": {
     "collection_method": "search_grounding",
     "status": "ok",
+    "reason": null,
+    "cached": false,
     "queries_run": [
-      "Copperline Analytics, LLC data breach",
-      "Copperline Analytics, LLC security incident notification",
       "Copperline Analytics, LLC 8-K Item 1.05 cybersecurity incident",
-      "copperline.example breach notice attorney general"
+      "copperline.example breach notice attorney general",
+      "Copperline Analytics, LLC security incident notification",
+      "Copperline Analytics, LLC data breach"
     ],
     "dropped_uncited": 0,
     "dropped_prohibited_source": 0,
@@ -81,7 +83,8 @@
         "prompt_tokens": 1800,
         "completion_tokens": 50,
         "cached_tokens": 0
-      }
+      },
+      "estimated_cost_usd": 0.015537
     }
   }
 }

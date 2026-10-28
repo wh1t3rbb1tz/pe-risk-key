@@ -1,9 +1,10 @@
 """Tests for pe_risk_key.collectors (SPEC §2, §4.1). No network access."""
 
 import ast
+import hashlib
 import json
 import ssl
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1179,6 +1180,7 @@ class _ScriptedSearchClient:
     extraction: Any = None
     calls: list = []
     extract_calls: list = []
+    tools_seen: list = []
 
     def __init__(self, role, **kwargs):
         assert role == "public_records", role
@@ -1190,6 +1192,7 @@ class _ScriptedSearchClient:
 
     def responses_search(self, query, *, instructions=None, **kwargs):
         type(self).calls.append(query)
+        type(self).tools_seen.append(kwargs.get("tools"))
         self.total_usage["prompt_tokens"] += 10
         self.total_usage["completion_tokens"] += 5
         pages = type(self).script[query]
@@ -1209,22 +1212,25 @@ class _ScriptedSearchClient:
 
 
 @pytest.fixture
-def search_script(monkeypatch):
+def search_script(monkeypatch, tmp_path):
     _ScriptedSearchClient.script = {}
     _ScriptedSearchClient.extraction = []
     _ScriptedSearchClient.calls = []
     _ScriptedSearchClient.extract_calls = []
+    _ScriptedSearchClient.tools_seen = []
     monkeypatch.setattr(incidents, "ModelClient", _ScriptedSearchClient)
+    monkeypatch.setattr(incidents, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.delenv("DEMO_MODE", raising=False)
+    monkeypatch.delenv("PUBLIC_RECORDS_MAX_INPUT_TOKENS", raising=False)
     return _ScriptedSearchClient
 
 
 COMPANY = "Acme Corporation"
 QUERIES = [
-    "Acme Corporation data breach",
-    "Acme Corporation security incident notification",
     "Acme Corporation 8-K Item 1.05 cybersecurity incident",
     f"{DOMAIN} breach notice attorney general",
+    "Acme Corporation security incident notification",
+    "Acme Corporation data breach",
 ]
 
 
@@ -1241,9 +1247,9 @@ def _incident_result(url, **overrides):
     return result
 
 
-def _quiet_script(queries=QUERIES):
+def _quiet_script(queries=QUERIES, copies=1):
     return {
-        query: [(["No incidents found for this query."], [])]
+        query: [(["No incidents found for this query."], [])] * copies
         for query in queries
     }
 
@@ -1264,6 +1270,8 @@ def test_incidents_uses_final_message_and_citations(search_script):
     out = incidents.collect(DOMAIN, company_name=COMPANY)
     assert out["collection_method"] == "search_grounding"
     assert out["status"] == "ok"
+    assert out["reason"] is None
+    assert out["cached"] is False
     assert out["queries_run"] == QUERIES
     assert search_script.calls == QUERIES  # 4-search cap, one call each
     # Phase 2 saw the final text and the citation, not the narration.
@@ -1364,10 +1372,10 @@ def test_incidents_uncertain_match_not_counted(search_script):
 
 def test_incidents_domain_fallback_and_query_cap(search_script):
     expected = [
-        f"{DOMAIN} data breach",
-        f"{DOMAIN} security incident notification",
         f"{DOMAIN} 8-K Item 1.05 cybersecurity incident",
         f"{DOMAIN} breach notice attorney general",
+        f"{DOMAIN} security incident notification",
+        f"{DOMAIN} data breach",
     ]
     search_script.script = _quiet_script(expected)
     search_script.extraction = [{"results": []}]
@@ -1439,6 +1447,8 @@ def test_incidents_reports_per_phase_usage(search_script):
             "completion_tokens": 20,
             "cached_tokens": 0,
         },
+        # 140 input × $1.25 + 40 output × $4.25 (per M) + 4 × $0.0025.
+        "estimated_cost_usd": 0.010345,
     }
 
 
@@ -1454,6 +1464,112 @@ def test_incidents_drops_invalid_date(search_script):
     assert out["results"] == []
     assert out["disclosed_within_months"] is None
     assert out["status"] == "ok"
+
+
+def test_incidents_queries_primary_sources_first(search_script):
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["queries_run"] == [
+        "Acme Corporation 8-K Item 1.05 cybersecurity incident",
+        f"{DOMAIN} breach notice attorney general",
+        "Acme Corporation security incident notification",
+        "Acme Corporation data breach",
+    ]
+
+
+def test_incidents_search_uses_low_context(search_script):
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    incidents.collect(DOMAIN, company_name=COMPANY)
+    assert search_script.tools_seen == [
+        [{"type": "web_search", "search_context_size": "low"}]
+    ] * 4
+
+
+def test_incidents_budget_skips_remaining_queries(
+    search_script, monkeypatch
+):
+    monkeypatch.setenv("PUBLIC_RECORDS_MAX_INPUT_TOKENS", "25")
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    # 10 input tokens per query: 30 > 25 after the third, fourth skipped.
+    assert search_script.calls == QUERIES[:3]
+    assert out["queries_run"] == QUERIES[:3]
+    assert out["status"] == "partial"
+    assert out["reason"] == "token_budget"
+    assert len(search_script.extract_calls) == 1  # still extracts
+    assert out["usage"]["searches"] == 3
+
+
+def test_incidents_cost_math_with_cached_tokens():
+    phase1 = {
+        "prompt_tokens": 100000,
+        "completion_tokens": 20000,
+        "cached_tokens": 50000,
+    }
+    phase2 = {
+        "prompt_tokens": 10000,
+        "completion_tokens": 1000,
+        "cached_tokens": 0,
+    }
+    # Billable input 60000 × $1.25 + cached 50000 × $0.15
+    # + output 21000 × $4.25 (per M) + 4 × $0.0025.
+    assert incidents._estimated_cost_usd(phase1, phase2, 4) == pytest.approx(
+        0.18175
+    )
+
+
+def test_incidents_cache_hit_makes_no_calls(search_script):
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    first = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert first["cached"] is False
+    assert len(search_script.calls) == 4
+    files = list(incidents.CACHE_DIR.glob("*.json"))
+    assert len(files) == 1
+    expected = hashlib.sha256(f"{DOMAIN}{COMPANY}".encode()).hexdigest()
+    assert files[0].name == f"{expected}.json"
+    second = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert second["cached"] is True
+    assert len(search_script.calls) == 4  # no new API calls
+    assert len(search_script.extract_calls) == 1
+    uncached = lambda out: {k: v for k, v in out.items() if k != "cached"}
+    assert uncached(second) == uncached(first)
+
+
+def test_incidents_cache_ttl_expiry(search_script):
+    search_script.script = _quiet_script(copies=2)
+    search_script.extraction = [{"results": []}, {"results": []}]
+    incidents.collect(DOMAIN, company_name=COMPANY)
+    (path,) = incidents.CACHE_DIR.glob("*.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["cached_at"] = (
+        datetime.now(timezone.utc) - timedelta(days=8)
+    ).isoformat()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["cached"] is False
+    assert len(search_script.calls) == 8  # fresh run, no hit
+
+
+def test_incidents_force_refresh_bypasses_cache(search_script):
+    search_script.script = _quiet_script(copies=2)
+    search_script.extraction = [{"results": []}, {"results": []}]
+    incidents.collect(DOMAIN, company_name=COMPANY)
+    out = incidents.collect(DOMAIN, company_name=COMPANY, force_refresh=True)
+    assert out["cached"] is False
+    assert len(search_script.calls) == 8
+
+
+def test_incidents_error_not_cached(search_script):
+    search_script.script = {query: RuntimeError("down") for query in QUERIES}
+    first = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert first["status"] == "error"
+    second = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert second["cached"] is False
+    assert len(search_script.calls) == 8
 
 
 def test_run_passes_company_name_to_incidents(search_script):

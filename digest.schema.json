@@ -264,7 +264,8 @@
         "required": [
           "function",
           "score",
-          "finding_count"
+          "finding_count",
+          "assessed"
         ],
         "additionalProperties": false,
         "properties": {
@@ -279,6 +280,10 @@
           "finding_count": {
             "type": "integer",
             "minimum": 0
+          },
+          "assessed": {
+            "type": "boolean",
+            "description": "False when no provided input covers this function; the score is then 100 by definition."
           }
         }
       }

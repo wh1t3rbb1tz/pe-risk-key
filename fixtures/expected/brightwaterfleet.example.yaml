@@ -61,3 +61,12 @@ expected_overall:
   max_rating: D
   deal_signal: escalate_full_diligence
   confidence: high
+
+expected_outside_in_only:
+  # Deterministic scoring parts of an outside-in-only demo run over the
+  # nine expected outside-in findings (no documents, no interview).
+  caps: [CAP-CRIT, CAP-INCIDENT]
+  rating: C
+  confidence: low
+  deal_signal: escalate_full_diligence
+  unassessed: [GV, DE, RC]

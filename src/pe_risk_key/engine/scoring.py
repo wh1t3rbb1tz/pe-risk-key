@@ -111,6 +111,7 @@ def score_functions(
             "function": function,
             "score": round(max(0.0, 100.0 - penalties[function]), 4),
             "finding_count": counts[function],
+            "assessed": function in assessed_set,
         }
         for function in FUNCTIONS
     ]

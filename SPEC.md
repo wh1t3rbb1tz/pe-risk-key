@@ -38,6 +38,8 @@ This boundary is a product feature and a hard engineering constraint. Collectors
 
 Every finding records `collection_method` so a reviewer can verify it stayed inside the boundary.
 
+**Enforcement:** all target HTTP/TLS traffic goes through `collectors/net.py` — the only collector module allowed to import HTTP/TLS clients (a static test fails otherwise). `safe_get` never follows redirects: a 3xx is recorded with its headers and location, never fetched. Per-run limits (one GET and two TLS probes per host) reset each run. `search_public_incidents` caches non-error outputs for 7 days under `.cache/public_incidents/` (gitignored).
+
 **Demo targets:** fictional companies on the reserved `.example` TLD, served from fixtures. No real third party's weaknesses appear in the demo or repo.
 
 ## 3. Architecture
@@ -121,6 +123,8 @@ Each collector is a pure function `collect(domain) -> dict` returning exactly it
 
 Fingerprint-based KEV matches are always `confidence: medium` at most and phrased as "potential exposure."
 
+**Output contract:** every collector section carries `status` (`ok`/`partial`/`error`) plus `collection_method`; single-host failures degrade to per-host error entries, never exceptions. TLS posture is a `tls_support` map (TLSv1.0–1.3 → true/false/`not_tested`) with a derived list of confirmed versions. Fingerprints carry `kind` (`web_server`, `cms`, `plugin`, `theme`, `appliance`, `cdn_or_proxy`), a capped locator list with `locator_count`, and merged versions. KEV matches are tiered (`appliance_exposed` vs `product_listed`), deduplicated per CVE and host, and never substring-matched. `search_public_incidents` runs in two phases (grounded search at minimal context, then strict-schema extraction), keeping only cited URLs from allowed sources (paste/breach-dump/credential-lookup denylist), gating on entity match, computing recency in code, and capping phase-1 input tokens.
+
 ### 4.2 Document analyzer (`analyzers/soc2.py`)
 
 Input: SOC 2 Type II report (PDF or text). Output: `soc2_analysis` block plus findings.
@@ -151,7 +155,7 @@ Constraints: the verdict must cite `evidence_refs` that exist in the digest. A v
 
 ### 4.5 Scoring (`engine/scoring.py`)
 
-Pure Python driven entirely by `scoring.yaml`. No model calls. Unit tested with fixed inputs → fixed outputs. See `scoring.yaml` for rules.
+Pure Python driven entirely by `scoring.yaml`. No model calls. Function scores start at 100 with severity × confidence × same-category-decay penalties; only functions covered by a provided input (`function_coverage`) count toward the renormalized weighted score, the rest are flagged unassessed. Rating bands apply, then explicit per-cap predicates. Remediation costs come from per-rule overrides × the size multiplier (bands as fallback) with per-rule effort overrides, and finding source derives deterministically from evidence and rule id. Unit tested with fixed inputs → fixed outputs.
 
 ### 4.6 Narrative and deal recommendations
 
@@ -200,17 +204,7 @@ Single page:
 
 ## 8. Day plan
 
-| Day | Deliverable | Done when |
-|---|---|---|
-| Oct 27 | Repo, these specs, provider interface, Muse Wonder structured-output smoke test, schema validator | A Wonder call returns schema-valid JSON |
-| Oct 28 | Collectors + fixtures + tests; attend Agents 102 | `pytest collectors/` green |
-| Oct 29 | Orchestrator agent with parallel tool calls; scoring engine | Fixture domain → scored findings |
-| Oct 30 | SOC 2 analyzer | Expected exceptions extracted from fixture |
-| Oct 31 | Interview pipeline + cross-check | Expected contradictions produced |
-| Nov 1 | Dashboard + trace panel; REST API | End-to-end in browser |
-| Nov 2 | MCP server; confidential mode on partner inference | Mode toggle works end to end |
-| Nov 3 | Eval harness, README, architecture diagram, demo video | Video recorded |
-| Nov 4 | Buffer; submit by noon PT; X post | Submitted |
+Done through Oct 28 (Wed): providers, collectors, orchestrator agent, rule engine, scoring, digest assembly. Remaining: Fri SOC 2 analyzer; Sat interview, cross-check, narrative/deal recs; Sun dashboard and API; Mon MCP, eval harness, confidential mode if time; Tue README and video; Wed buffer (submit by noon PT, X post).
 
 Cut order if behind: confidential mode → compare_targets → PDF export.
 

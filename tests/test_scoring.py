@@ -75,9 +75,12 @@ def test_known_findings_exact_scores():
     assert by_function["PR"]["finding_count"] == 2
     assert by_function["ID"]["score"] == pytest.approx(94.0)
     assert by_function["RS"]["score"] == pytest.approx(86.5)
+    for function in ("ID", "PR", "RS"):
+        assert by_function[function]["assessed"] is True
     for function in ("GV", "DE", "RC"):
         assert by_function[function]["score"] == 100.0
         assert by_function[function]["finding_count"] == 0
+        assert by_function[function]["assessed"] is False
     # (94×.15 + 54.2×.30 + 86.5×.10) / .55 = 70.927…
     assert out["overall"]["score"] == pytest.approx(70.92727272727273)
     assert out["overall"]["rating"] == "C"  # B capped by CAP-CRIT

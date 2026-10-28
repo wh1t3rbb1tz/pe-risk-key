@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import dns.resolver
 import pytest
+import yaml
 
 import pe_risk_key.agent.context as agent_context
 import pe_risk_key.agent.orchestrator as orchestrator
@@ -18,6 +19,7 @@ from pe_risk_key.collectors import incidents, kev, net, web_posture
 from pe_risk_key.validate import validate_digest
 
 DOMAIN = "brightwaterfleet.example"
+ROOT = Path(__file__).resolve().parents[1]
 KEV_MINI = Path(__file__).resolve().parent / "data" / "kev_mini.json"
 
 
@@ -470,6 +472,14 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
     by_function = {e["function"]: e for e in digest["function_scores"]}
     assert by_function["PR"]["score"] == 79.0
     assert by_function["PR"]["finding_count"] == 2
+    assert [e["assessed"] for e in digest["function_scores"]] == [
+        False,
+        True,
+        True,
+        False,
+        True,
+        False,
+    ]
     plan = digest["remediation_plan"]
     assert plan["total_cost_low_usd"] == 10000
     assert plan["total_cost_high_usd"] == 40000
@@ -480,6 +490,96 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
     validated = [e for e in trace if e["type"] == "digest_validated"]
     assert len(validated) == 1
     assert validated[0]["valid"] is True
+
+
+# The nine expected outside-in findings: id, rule, severity, confidence,
+# category, title.
+_OUTSIDE_IN_FINDINGS = [
+    ("F-001", "EMAIL-DMARC-NONE", "high", "high", "PR.DS", "DMARC none"),
+    ("F-002", "EMAIL-SPF-SOFT", "medium", "high", "PR.DS", "SPF soft"),
+    ("F-003", "DNS-NO-DNSSEC", "low", "high", "PR.PS", "No DNSSEC"),
+    ("F-004", "SURFACE-RISKY-HOSTS", "medium", "medium", "ID.AM", "Risky hosts"),
+    ("F-005", "SURFACE-SPRAWL", "low", "medium", "ID.AM", "Sprawl"),
+    ("F-006", "WEB-LEGACY-TLS", "medium", "high", "PR.DS", "Legacy TLS"),
+    ("F-007", "WEB-NO-HSTS", "low", "high", "PR.DS", "No HSTS"),
+    ("F-008", "KEV-POTENTIAL", "critical", "medium", "ID.RA", "KEV hit"),
+    ("F-009", "PUB-INCIDENT-RECENT", "high", "high", "RS.MA", "Incident"),
+]
+
+
+def _outside_in_finding(entry):
+    finding_id, rule_id, severity, confidence, category, title = entry
+    index = int(finding_id.split("-")[1])
+    return {
+        "finding_id": finding_id,
+        "title": title,
+        "severity": severity,
+        "confidence": confidence,
+        "csf_function": category.split(".")[0],
+        "csf_category": category,
+        "source": "outside_in",
+        "evidence": [
+            {
+                "evidence_id": f"E-{index:03d}",
+                "source_type": "outside_in",
+                "collection_method": "dns_query",
+                "locator": f"locator-{finding_id}",
+                "excerpt": f"Evidence for {finding_id}.",
+            }
+        ],
+        "deal_impact": f"Impact of {finding_id}.",
+        "remediation": {
+            "summary": f"Fix {finding_id}.",
+            "cost_low_usd": 0,
+            "cost_high_usd": 0,
+            "effort_weeks": 0,
+        },
+        "rule_id": rule_id,
+    }
+
+
+def test_demo_run_matches_expected_outside_in_only(agent_env, monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "1")
+    expected = yaml.safe_load(
+        (
+            ROOT / "fixtures/expected/brightwaterfleet.example.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    block = expected["expected_outside_in_only"]
+    findings = [_outside_in_finding(entry) for entry in _OUTSIDE_IN_FINDINGS]
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {"content": "Submitting.", "tool_calls": [_submit(*findings)]},
+    ]
+    result = run_digest(
+        DOMAIN, "Brightwater Fleet Systems, Inc.", "201-1000", "50M-250M"
+    )
+    digest = json.loads(
+        (Path(result["trace_path"]).parent / "digest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert validate_digest(digest) == []
+    assert digest["overall"]["rating_caps_applied"] == block["caps"]
+    assert digest["overall"]["rating"] == block["rating"]
+    assert digest["overall"]["confidence"] == block["confidence"]
+    assert digest["overall"]["deal_signal"] == block["deal_signal"]
+    unassessed = [
+        entry["function"]
+        for entry in digest["function_scores"]
+        if not entry["assessed"]
+    ]
+    assert unassessed == block["unassessed"]
 
 
 def test_trace_file_complete_and_ordered(agent_env, monkeypatch):

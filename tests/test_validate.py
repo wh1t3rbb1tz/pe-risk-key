@@ -30,7 +30,12 @@ def _valid_digest() -> dict:
             "rating_caps_applied": [],
         },
         "function_scores": [
-            {"function": "PR", "score": 60.0, "finding_count": 1}
+            {
+                "function": "PR",
+                "score": 60.0,
+                "finding_count": 1,
+                "assessed": True,
+            }
         ],
         "findings": [
             {

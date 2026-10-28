@@ -105,10 +105,13 @@ def print_digest_summary(digest: dict) -> None:
     )
     print("function scores:")
     for entry in digest["function_scores"]:
-        print(
-            f"  {entry['function']}: {entry['score']:.1f} "
-            f"({entry['finding_count']} findings)"
-        )
+        if entry["assessed"]:
+            print(
+                f"  {entry['function']}: {entry['score']:.1f} "
+                f"({entry['finding_count']} findings)"
+            )
+        else:
+            print(f"  {entry['function']}: not assessed")
 
 
 def main() -> int:

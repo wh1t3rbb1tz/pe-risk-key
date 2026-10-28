@@ -1,0 +1,469 @@
+{
+  "schema_version": "1.0.0",
+  "digest_id": "dg_wxsni739n8au",
+  "generated_at": "2026-10-28T07:10:19.850755+00:00",
+  "target": {
+    "name": "Brightwater Fleet Systems",
+    "domain": "brightwaterfleet.example",
+    "revenue_band": "50M-250M",
+    "employee_band": "201-1000"
+  },
+  "mode": {
+    "confidential": false,
+    "demo": true,
+    "providers": [
+      {
+        "role": "orchestrator",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "public_records",
+        "provider": "meta_model_api",
+        "model": "muse-spark-1.3"
+      }
+    ]
+  },
+  "inputs": {
+    "domain_scan": true,
+    "documents": [],
+    "interviews": []
+  },
+  "overall": {
+    "score": 71.6364,
+    "rating": "C",
+    "deal_signal": "escalate_full_diligence",
+    "confidence": "low",
+    "rating_caps_applied": [
+      "CAP-CRIT",
+      "CAP-INCIDENT"
+    ]
+  },
+  "function_scores": [
+    {
+      "function": "GV",
+      "score": 100.0,
+      "finding_count": 0
+    },
+    {
+      "function": "ID",
+      "score": 66.4,
+      "finding_count": 3
+    },
+    {
+      "function": "PR",
+      "score": 70.8,
+      "finding_count": 5
+    },
+    {
+      "function": "DE",
+      "score": 100.0,
+      "finding_count": 0
+    },
+    {
+      "function": "RS",
+      "score": 82.0,
+      "finding_count": 1
+    },
+    {
+      "function": "RC",
+      "score": 100.0,
+      "finding_count": 0
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "rule_id": "EMAIL-DMARC-NONE",
+      "title": "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-001",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_email_auth",
+          "locator": "_dmarc.brightwaterfleet.example TXT",
+          "excerpt": "DMARC record: v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example; policy=none, pct=100, rua=true"
+        }
+      ],
+      "deal_impact": "Domain can be spoofed for BEC/wire fraud against customers and finance counterparties, creating fraud and insurability risk until DMARC is enforced.",
+      "remediation": {
+        "summary": "Move DMARC from p=none to quarantine then reject after monitoring rua reports and aligning SPF/DKIM senders.",
+        "cost_low_usd": 8000,
+        "cost_high_usd": 30000,
+        "effort_weeks": 8
+      }
+    },
+    {
+      "finding_id": "F-002",
+      "rule_id": "EMAIL-SPF-SOFT",
+      "title": "SPF uses soft/neutral fail",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-002",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_email_auth",
+          "locator": "brightwaterfleet.example TXT",
+          "excerpt": "SPF record: v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all; qualifier=~all, lookup_count=2"
+        }
+      ],
+      "deal_impact": "Soft-fail SPF weakens spoofing resistance and compounds the unenforced DMARC posture for a fleet/finance-heavy business.",
+      "remediation": {
+        "summary": "Inventory authorized senders then change SPF ~all to -all in coordination with DMARC enforcement.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 8000,
+        "effort_weeks": 3
+      }
+    },
+    {
+      "finding_id": "F-003",
+      "rule_id": "DNS-NO-DNSSEC",
+      "title": "DNSSEC not enabled",
+      "severity": "low",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.PS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-003",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_dnssec",
+          "locator": "brightwaterfleet.example DS",
+          "excerpt": "DS query for brightwaterfleet.example: enabled=false"
+        }
+      ],
+      "deal_impact": "Unsigned DNS increases cache-poisoning/redirection risk; low standalone deal impact but expected by insurers.",
+      "remediation": {
+        "summary": "Enable DNSSEC at registrar/DNS provider and verify DS publication and validation.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-004",
+      "rule_id": "SURFACE-RISKY-HOSTS",
+      "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems",
+      "severity": "medium",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-004",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "vpn.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern=vpn, first_seen=2023-02-11, last_seen=2026-09-30; risky_hostnames_count=4"
+        },
+        {
+          "evidence_id": "E-005",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "jenkins-old.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern=jenkins|old, first_seen=2021-06-03, last_seen=2026-08-14"
+        },
+        {
+          "evidence_id": "E-006",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "staging-api.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern=staging, first_seen=2024-01-20, last_seen=2026-10-01"
+        },
+        {
+          "evidence_id": "E-007",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "legacy-portal.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern=legacy, first_seen=2019-11-05, last_seen=2026-07-22"
+        }
+      ],
+      "deal_impact": "Public admin/legacy/staging names enlarge attack surface and suggest decommissioning and access-control diligence is needed pre-close.",
+      "remediation": {
+        "summary": "Validate ownership and exposure of each risky host, remove or restrict legacy/staging systems, and enforce MFA/VPN controls.",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "effort_weeks": 6
+      }
+    },
+    {
+      "finding_id": "F-005",
+      "rule_id": "SURFACE-SPRAWL",
+      "title": "Large certificate footprint relative to company size",
+      "severity": "low",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-008",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+          "excerpt": "CT query returned unique_hostnames=47, above the >40 rule threshold for a 201-1000 employee company."
+        }
+      ],
+      "deal_impact": "A 47-host certificate footprint indicates possible asset sprawl and incomplete inventory, raising diligence and management overhead.",
+      "remediation": {
+        "summary": "Reconcile all CT hostnames to an asset inventory, assign owners, and retire unneeded certificates/hosts.",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "effort_weeks": 4
+      }
+    },
+    {
+      "finding_id": "F-006",
+      "rule_id": "WEB-LEGACY-TLS",
+      "title": "Deprecated TLS versions offered",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-009",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/",
+          "excerpt": "tls_support: TLSv1.0=true, TLSv1.1=true, TLSv1.2=true; tls_versions=[TLSv1.0, TLSv1.1, TLSv1.2]"
+        }
+      ],
+      "deal_impact": "Deprecated TLS on www weakens transport security and may fail customer/insurer security reviews.",
+      "remediation": {
+        "summary": "Disable TLSv1.0 and TLSv1.1, retain TLSv1.2+ with modern ciphers, and retest all hosts.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 15000,
+        "effort_weeks": 4
+      }
+    },
+    {
+      "finding_id": "F-007",
+      "rule_id": "WEB-NO-HSTS",
+      "title": "HSTS not set",
+      "severity": "low",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-010",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://brightwaterfleet.example/",
+          "excerpt": "Header strict-transport-security=null on https://brightwaterfleet.example/"
+        },
+        {
+          "evidence_id": "E-011",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/",
+          "excerpt": "Header strict-transport-security=null on https://www.brightwaterfleet.example/"
+        }
+      ],
+      "deal_impact": "Without HSTS, users can be downgraded to plaintext, undermining portal trust; easy remediation expected by insurers.",
+      "remediation": {
+        "summary": "Set Strict-Transport-Security with an appropriate max-age on apex and www after confirming HTTPS-only operation.",
+        "cost_low_usd": 1000,
+        "cost_high_usd": 5000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-008",
+      "rule_id": "KEV-POTENTIAL",
+      "title": "Internet-facing appliance listed in CISA KEV (version not verified)",
+      "severity": "critical",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.RA",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-012",
+          "source_type": "outside_in",
+          "collection_method": "offline_lookup",
+          "collector": "match_known_exploited",
+          "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+          "excerpt": "KEV match CVE-PLACEHOLDER-0001, ExampleGate SSL-VPN 7.0.11, match_tier=appliance_exposed, match_level=product; note: KEV lists products, not affected versions; version not verified. Snapshot 2026-10-20."
+        },
+        {
+          "evidence_id": "E-013",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+          "excerpt": "Fingerprint: product=ExampleGate SSL-VPN, version=7.0.11, kind=appliance, source=asset_path on www host."
+        }
+      ],
+      "deal_impact": "Potential exposure to a KEV-listed internet-facing appliance (version not verified) could enable initial access; requires urgent patch verification and may affect closing conditions/insurability.",
+      "remediation": {
+        "summary": "Immediately verify appliance version and patch level against KEV, patch or isolate the appliance, and review VPN logs for compromise.",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 150000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-009",
+      "rule_id": "PUB-INCIDENT-RECENT",
+      "title": "Publicly disclosed security incident in the last 24 months",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "RS",
+      "csf_category": "RS.MA",
+      "source": "public_record",
+      "evidence": [
+        {
+          "evidence_id": "E-014",
+          "source_type": "public_record",
+          "collection_method": "search_grounding",
+          "collector": "search_public_incidents",
+          "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+          "excerpt": "State AG breach notice dated 2025-08-14: unauthorized access to a customer support system; approx. 3,100 individuals notified. disclosed_within_months=14, entity_match=exact."
+        }
+      ],
+      "deal_impact": "A disclosed incident 14 months ago raises regulatory, notification-cost, and recurrence-risk questions for valuation and reps/warranties.",
+      "remediation": {
+        "summary": "Obtain incident report, regulator correspondence, remediation evidence and lessons-learned; confirm notification and monitoring obligations are closed.",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 100000,
+        "effort_weeks": 6
+      }
+    }
+  ],
+  "contradictions": [],
+  "remediation_plan": {
+    "items": [
+      {
+        "action": "Move DMARC from p=none to quarantine then reject after monitoring rua reports and aligning SPF/DKIM senders.",
+        "finding_ids": [
+          "F-001"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 8000,
+        "cost_high_usd": 30000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Inventory authorized senders then change SPF ~all to -all in coordination with DMARC enforcement.",
+        "finding_ids": [
+          "F-002"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 8000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Enable DNSSEC at registrar/DNS provider and verify DS publication and validation.",
+        "finding_ids": [
+          "F-003"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Validate ownership and exposure of each risky host, remove or restrict legacy/staging systems, and enforce MFA/VPN controls.",
+        "finding_ids": [
+          "F-004"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Reconcile all CT hostnames to an asset inventory, assign owners, and retire unneeded certificates/hosts.",
+        "finding_ids": [
+          "F-005"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Disable TLSv1.0 and TLSv1.1, retain TLSv1.2+ with modern ciphers, and retest all hosts.",
+        "finding_ids": [
+          "F-006"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 15000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Set Strict-Transport-Security with an appropriate max-age on apex and www after confirming HTTPS-only operation.",
+        "finding_ids": [
+          "F-007"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 1000,
+        "cost_high_usd": 5000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Immediately verify appliance version and patch level against KEV, patch or isolate the appliance, and review VPN logs for compromise.",
+        "finding_ids": [
+          "F-008"
+        ],
+        "window": "days_0_30",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 150000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Obtain incident report, regulator correspondence, remediation evidence and lessons-learned; confirm notification and monitoring obligations are closed.",
+        "finding_ids": [
+          "F-009"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 100000,
+        "owner_role": "Incident Response"
+      }
+    ],
+    "total_cost_low_usd": 80000,
+    "total_cost_high_usd": 388000
+  },
+  "deal_recommendations": [],
+  "narrative": {
+    "executive_summary": "Narrative pending."
+  },
+  "limitations": [
+    "Unassessed CSF functions (no evidence from provided inputs): GV, DE, RC",
+    "Passive outside-in assessment only; no authenticated or internal testing",
+    "KEV matches are product-level; versions not verified",
+    "No SOC 2 report provided",
+    "No management interview provided",
+    "Demo mode: signals from fixtures"
+  ],
+  "trace_ref": "/Users/jjpowell/code/pe-risk-key/eval/runs/dg_wxsni739n8au/trace.jsonl"
+}

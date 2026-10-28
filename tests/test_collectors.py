@@ -230,7 +230,11 @@ def test_tool_definitions_shape():
         params = definition["function"]["parameters"]
         assert params["required"] == ["domain"]
         if definition["function"]["name"] == "search_public_incidents":
-            assert set(params["properties"]) == {"domain", "company_name"}
+            assert set(params["properties"]) == {
+                "domain",
+                "company_name",
+                "aliases",
+            }
         else:
             assert set(params["properties"]) == {"domain"}
 
@@ -1181,6 +1185,7 @@ class _ScriptedSearchClient:
     calls: list = []
     extract_calls: list = []
     tools_seen: list = []
+    bumps: list = []
 
     def __init__(self, role, **kwargs):
         assert role == "public_records", role
@@ -1193,7 +1198,10 @@ class _ScriptedSearchClient:
     def responses_search(self, query, *, instructions=None, **kwargs):
         type(self).calls.append(query)
         type(self).tools_seen.append(kwargs.get("tools"))
-        self.total_usage["prompt_tokens"] += 10
+        if type(self).bumps:
+            self.total_usage["prompt_tokens"] += type(self).bumps.pop(0)
+        else:
+            self.total_usage["prompt_tokens"] += 10
         self.total_usage["completion_tokens"] += 5
         pages = type(self).script[query]
         if isinstance(pages, Exception):
@@ -1218,6 +1226,7 @@ def search_script(monkeypatch, tmp_path):
     _ScriptedSearchClient.calls = []
     _ScriptedSearchClient.extract_calls = []
     _ScriptedSearchClient.tools_seen = []
+    _ScriptedSearchClient.bumps = []
     monkeypatch.setattr(incidents, "ModelClient", _ScriptedSearchClient)
     monkeypatch.setattr(incidents, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.delenv("DEMO_MODE", raising=False)
@@ -1487,20 +1496,66 @@ def test_incidents_search_uses_low_context(search_script):
     ] * 4
 
 
-def test_incidents_budget_skips_remaining_queries(
+def test_incidents_budget_stops_before_exceeding(
     search_script, monkeypatch
 ):
     monkeypatch.setenv("PUBLIC_RECORDS_MAX_INPUT_TOKENS", "25")
     search_script.script = _quiet_script()
     search_script.extraction = [{"results": []}]
     out = incidents.collect(DOMAIN, company_name=COMPANY)
-    # 10 input tokens per query: 30 > 25 after the third, fourth skipped.
-    assert search_script.calls == QUERIES[:3]
-    assert out["queries_run"] == QUERIES[:3]
+    # 10 input tokens per query: before the third, 20 + 10 > 25 stops it.
+    assert search_script.calls == QUERIES[:2]
+    assert out["queries_run"] == QUERIES[:2]
     assert out["status"] == "partial"
     assert out["reason"] == "token_budget"
     assert len(search_script.extract_calls) == 1  # still extracts
-    assert out["usage"]["searches"] == 3
+    assert out["usage"]["searches"] == 2
+
+
+def test_incidents_budget_predicts_from_largest_query(
+    search_script, monkeypatch
+):
+    monkeypatch.setenv("PUBLIC_RECORDS_MAX_INPUT_TOKENS", "65")
+    search_script.script = _quiet_script()
+    search_script.extraction = [{"results": []}]
+    search_script.bumps = [50, 10, 10, 10]
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    # After the 50-token query, 50 + 50 > 65 stops the run even though
+    # the next query would only cost 10.
+    assert search_script.calls == QUERIES[:1]
+    assert out["status"] == "partial"
+    assert out["reason"] == "token_budget"
+
+
+def test_incidents_partial_result_cached(search_script):
+    script = _quiet_script()
+    script[QUERIES[0]] = RuntimeError("boom")
+    search_script.script = script
+    search_script.extraction = [{"results": []}]
+    first = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert first["status"] == "partial"
+    second = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert second["cached"] is True
+    assert second["status"] == "partial"
+    assert len(search_script.calls) == 4  # no new API calls
+    assert len(search_script.extract_calls) == 1
+
+
+def test_incidents_aliases_same_entity(search_script):
+    search_script.script = _quiet_script(copies=2)
+    search_script.extraction = [{"results": []}, {"results": []}]
+    out = incidents.collect(
+        DOMAIN, company_name=COMPANY, aliases=["Acme Corp", "ACME Inc."]
+    )
+    assert out["queries_run"] == QUERIES  # primary name only
+    system_text = search_script.extract_calls[0][0]["content"]
+    assert COMPANY in system_text
+    assert "Acme Corp" in system_text
+    assert "ACME Inc." in system_text
+    assert "same entity" in system_text
+    # Aliased runs get their own cache entry.
+    incidents.collect(DOMAIN, company_name=COMPANY)
+    assert len(list(incidents.CACHE_DIR.glob("*.json"))) == 2
 
 
 def test_incidents_cost_math_with_cached_tokens():

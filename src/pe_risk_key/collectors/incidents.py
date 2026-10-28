@@ -142,6 +142,14 @@ INPUT_SCHEMA = {
                 "defaults to the domain."
             ),
         },
+        "aliases": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Other names for the target company; treated as the "
+                "same entity when matching incidents."
+            ),
+        },
     },
     "required": ["domain"],
     "additionalProperties": False,
@@ -178,9 +186,21 @@ def _search_instructions(company: str, domain: str) -> str:
 
 
 def _extract_messages(
-    texts: list[tuple[str, str]], citations: list[tuple[str, str]]
+    texts: list[tuple[str, str]],
+    citations: list[tuple[str, str]],
+    company: str,
+    aliases: list[str],
 ) -> list[dict[str, str]]:
     types = ", ".join(RESULT_TYPES)
+    if aliases:
+        alias_rule = (
+            f"- The target company ({company}) is also known as: "
+            + ", ".join(aliases)
+            + ". Treat all of these names as the same entity when "
+            "setting entity_match.\n"
+        )
+    else:
+        alias_rule = ""
     summaries = "\n\n".join(
         f"Query: {query}\nSummary:\n{text}" for query, text in texts
     )
@@ -210,7 +230,8 @@ def _extract_messages(
                 "company\n"
                 "- Use only URLs from the citation list below. Never "
                 "invent, shorten, or modify a URL.\n"
-                "- Prefer primary sources (SEC filings, state AG "
+                + alias_rule
+                + "- Prefer primary sources (SEC filings, state AG "
                 "notices, regulator actions, company statements) over "
                 "press reports. When both describe the same incident, "
                 "output the primary source only, and set type from the "
@@ -317,9 +338,11 @@ def _estimated_cost_usd(
     )
 
 
-def _cache_path(domain: str, company_name: str | None) -> Path:
+def _cache_path(
+    domain: str, company_name: str | None, aliases: list[str]
+) -> Path:
     digest = hashlib.sha256(
-        f"{domain}{company_name or ''}".encode("utf-8")
+        f"{domain}{company_name or ''}{''.join(aliases)}".encode("utf-8")
     ).hexdigest()
     return CACHE_DIR / f"{digest}.json"
 
@@ -381,21 +404,25 @@ def collect(
     domain: str,
     company_name: str | None = None,
     force_refresh: bool = False,
+    aliases: list[str] | None = None,
 ) -> dict:
     """Collect public incident disclosures: search, then strict extraction.
 
     Phase 1 runs at most ``MAX_SEARCHES_PER_RUN`` grounded searches
-    (``muse-spark-1.3``, standard mode, minimal search context) and
-    keeps each final answer text plus its citations. Phase 2 extracts
-    ``results[]`` from those texts in a single strict-schema call, using
-    only cited URLs. ``disclosed_within_months`` is computed in code.
+    (``muse-spark-1.3``, standard mode, minimal search context) against
+    the primary ``company_name`` and keeps each final answer text plus
+    its citations. Phase 2 extracts ``results[]`` from those texts in a
+    single strict-schema call, using only cited URLs and treating
+    ``aliases`` as the same entity for ``entity_match``.
+    ``disclosed_within_months`` is computed in code.
 
-    Successful outputs are cached for 7 days; a cache hit returns with
+    Non-error outputs are cached for 7 days; a cache hit returns with
     ``"cached": true`` and makes no API calls. ``force_refresh``
     bypasses the cache read. Phase-1 input tokens are capped by
-    ``PUBLIC_RECORDS_MAX_INPUT_TOKENS``; once exceeded, remaining
-    queries are skipped and the run is ``partial`` with reason
-    ``token_budget``.
+    ``PUBLIC_RECORDS_MAX_INPUT_TOKENS``: before each query, the run
+    stops when cumulative input tokens plus the largest single-query
+    input so far would exceed the budget, and the run is ``partial``
+    with reason ``token_budget``.
 
     Status is ``ok`` when extraction succeeded (even with zero
     results), ``partial`` when some phase-1 queries failed or the
@@ -403,7 +430,8 @@ def collect(
     failed or extraction failed.
     """
     company = company_name or domain
-    cache_path = _cache_path(domain, company_name)
+    alias_list = list(aliases or [])
+    cache_path = _cache_path(domain, company_name, alias_list)
     if not force_refresh:
         cached = _read_cache(cache_path)
         if cached is not None:
@@ -420,8 +448,18 @@ def collect(
     seen_citations: set[str] = set()
     failed = 0
     phase1_input_tokens = 0
+    largest_query_input = 0
     budget_hit = False
-    for index, query in enumerate(queries):
+    for query in queries:
+        if phase1_input_tokens + largest_query_input > max_input_tokens:
+            budget_hit = True
+            print(
+                f"[search_public_incidents] token budget would exceed "
+                f"({phase1_input_tokens} + {largest_query_input} > "
+                f"{max_input_tokens}); skipping {query!r} and the rest",
+                file=sys.stderr,
+            )
+            break
         attempted.append(query)
         tokens_before = client.total_usage["prompt_tokens"]
         try:
@@ -442,24 +480,15 @@ def collect(
                 file=sys.stderr,
             )
             continue
-        phase1_input_tokens += (
-            client.total_usage["prompt_tokens"] - tokens_before
-        )
+        query_input = client.total_usage["prompt_tokens"] - tokens_before
+        phase1_input_tokens += query_input
+        largest_query_input = max(largest_query_input, query_input)
         text, cites = _extract_final_text_and_citations(response)
         texts.append((query, text))
         for url, title in cites:
             if url not in seen_citations:
                 seen_citations.add(url)
                 citations.append((url, title))
-        if phase1_input_tokens > max_input_tokens and index + 1 < len(queries):
-            budget_hit = True
-            print(
-                f"[search_public_incidents] token budget exceeded "
-                f"({phase1_input_tokens} > {max_input_tokens}); skipping "
-                f"{len(queries) - index - 1} remaining queries",
-                file=sys.stderr,
-            )
-            break
     phase1_usage = _usage_delta(usage_before, client.total_usage)
 
     def _base(status: str, phase2_usage: dict) -> dict:
@@ -489,7 +518,7 @@ def collect(
     extract_before = dict(client.total_usage)
     try:
         extracted = client.chat_json(
-            _extract_messages(texts, citations),
+            _extract_messages(texts, citations, company, alias_list),
             schema=RESULTS_SCHEMA,
             schema_name="incident_results",
         )
@@ -554,6 +583,6 @@ def collect(
         if counted_dates
         else None
     )
-    if status == "ok":
+    if status != "error":
         _write_cache(cache_path, out)
     return out

@@ -90,6 +90,27 @@ def print_usage(usage: dict) -> None:
     print(f"estimated cost: ${usage['estimated_cost_usd']:.4f}")
 
 
+def print_digest_summary(digest: dict) -> None:
+    overall = digest["overall"]
+    plan = digest["remediation_plan"]
+    print(
+        f"\noverall: score={overall['score']:.1f} rating={overall['rating']} "
+        f"confidence={overall['confidence']} "
+        f"deal_signal={overall['deal_signal']}"
+    )
+    print(f"caps applied: {overall['rating_caps_applied'] or '-'}")
+    print(
+        f"remediation total: ${plan['total_cost_low_usd']:,.0f} - "
+        f"${plan['total_cost_high_usd']:,.0f}"
+    )
+    print("function scores:")
+    for entry in digest["function_scores"]:
+        print(
+            f"  {entry['function']}: {entry['score']:.1f} "
+            f"({entry['finding_count']} findings)"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--domain", required=True)
@@ -125,6 +146,8 @@ def main() -> int:
     print_adjustments(result["adjustments"])
     print_recall(result["findings"], args.domain)
     print_usage(result["usage"])
+    digest_path = Path(result["trace_path"]).parent / "digest.json"
+    print_digest_summary(json.loads(digest_path.read_text(encoding="utf-8")))
     print(f"saved: {Path(result['trace_path']).parent.relative_to(ROOT)}/")
     return 0
 

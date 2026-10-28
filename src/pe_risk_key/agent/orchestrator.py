@@ -10,7 +10,9 @@ Everything lands in ``eval/runs/<digest_id>/``: ``trace.jsonl``,
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +27,9 @@ from pe_risk_key.agent.prompts import (
     target_brief,
 )
 from pe_risk_key.engine.rules import apply_rule_constraints
-from pe_risk_key.providers import Mode, ModelClient
+from pe_risk_key.engine.scoring import score_digest
+from pe_risk_key.providers import SPARK_MODEL, STANDARD_PROVIDER, Mode, ModelClient
+from pe_risk_key.validate import validate_digest
 from pe_risk_key.schemas import (
     strict_subschema,
     strip_nullable_optionals,
@@ -195,6 +199,72 @@ def _execute_calls(
 def _parse_submission(call: dict[str, Any]) -> list[Any]:
     findings = call["arguments"].get("findings", [])
     return findings if isinstance(findings, list) else []
+
+
+def _assemble_digest(
+    *,
+    digest_id: str,
+    domain: str,
+    company_name: str,
+    employee_band: str,
+    revenue_band: str,
+    industry: str | None,
+    mode: str,
+    client: ModelClient,
+    collector_outputs: dict[str, Any],
+    findings: list[dict],
+    scored: dict[str, Any],
+    trace_path: str,
+) -> dict[str, Any]:
+    """Build the full digest dict per digest.schema.json."""
+    target: dict[str, Any] = {
+        "name": company_name,
+        "domain": domain,
+        "revenue_band": revenue_band,
+        "employee_band": employee_band,
+    }
+    if industry is not None:
+        target["industry"] = industry
+    providers = [
+        {
+            "role": "orchestrator",
+            "provider": client.provider,
+            "model": client.model,
+        }
+    ]
+    if "search_public_incidents" in collector_outputs:
+        providers.append(
+            {
+                "role": "public_records",
+                "provider": STANDARD_PROVIDER,
+                "model": SPARK_MODEL,
+            }
+        )
+    return {
+        "schema_version": "1.0.0",
+        "digest_id": digest_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "target": target,
+        "mode": {
+            "confidential": mode == "confidential",
+            "demo": os.getenv("DEMO_MODE") == "1",
+            "providers": providers,
+        },
+        "inputs": {
+            "domain_scan": True,
+            "documents": [],
+            "interviews": [],
+        },
+        "overall": scored["overall"],
+        "function_scores": scored["function_scores"],
+        "findings": findings,
+        "contradictions": [],
+        "remediation_plan": scored["remediation_plan"],
+        "deal_recommendations": [],
+        "narrative": {"executive_summary": "Narrative pending."},
+        "limitations": scored["limitations"],
+        "trace_ref": trace_path,
+    }
 
 
 def run_digest(
@@ -407,6 +477,49 @@ def run_digest(
     (run_dir / "findings.json").write_text(
         json.dumps({"findings": findings}, indent=2), encoding="utf-8"
     )
+
+    scored = score_digest(
+        findings,
+        [],
+        scoring,
+        domain_scan=True,
+        has_soc2=False,
+        has_interview=False,
+        soc2_opinion=None,
+        revenue_band=revenue_band,
+    )
+    ctx.trace.event(
+        "scoring_complete",
+        overall=scored["overall"],
+        function_scores=scored["function_scores"],
+    )
+    digest = _assemble_digest(
+        digest_id=digest_id,
+        domain=domain,
+        company_name=company_name,
+        employee_band=employee_band,
+        revenue_band=revenue_band,
+        industry=industry,
+        mode=mode,
+        client=client,
+        collector_outputs=ctx.outputs,
+        findings=findings,
+        scored=scored,
+        trace_path=str(run_dir / "trace.jsonl"),
+    )
+    digest_errors = validate_digest(digest)
+    (run_dir / "digest.json").write_text(
+        json.dumps(digest, indent=2), encoding="utf-8"
+    )
+    ctx.trace.event(
+        "digest_validated",
+        valid=not digest_errors,
+        errors=digest_errors,
+    )
+    if digest_errors:
+        raise ValueError(
+            "Assembled digest failed validation: " + "; ".join(digest_errors)
+        )
     usage = {
         **client.total_usage,
         "estimated_cost_usd": estimate_cost(client.total_usage),

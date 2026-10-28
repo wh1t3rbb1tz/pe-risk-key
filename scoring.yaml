@@ -48,6 +48,15 @@ function_weights:
   RC: 0.10
 # Functions with no evidence at all are scored but flagged; see confidence.
 
+# --- Input coverage -----------------------------------------------------------
+# Which CSF functions each input type can assess. Functions covered by no
+# provided input are excluded from the weighted score (weights renormalized
+# over assessed functions) and listed in limitations.
+function_coverage:
+  outside_in: [ID, PR, RS]
+  soc2: [GV, ID, PR, DE, RS, RC]
+  interview: [GV]
+
 # --- Overall rating ----------------------------------------------------------
 rating_bands:        # inclusive lower bounds on weighted score
   A: 85
@@ -56,7 +65,9 @@ rating_bands:        # inclusive lower bounds on weighted score
   D: 40
   F: 0
 
-# Caps limit the rating regardless of the numeric score.
+# Caps limit the rating regardless of the numeric score. The `when` strings
+# below are documentation; each cap id is implemented as an explicit Python
+# predicate in engine/scoring.py CAP_IMPLEMENTATIONS (a test pins the mapping).
 rating_caps:
   - id: CAP-CRIT
     when: "any finding severity == critical and confidence in [medium, high]"

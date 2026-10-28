@@ -15,6 +15,7 @@ import pe_risk_key.agent.orchestrator as orchestrator
 from pe_risk_key.agent import run_digest
 from pe_risk_key.agent.prompts import system_prompt
 from pe_risk_key.collectors import incidents, kev, net, web_posture
+from pe_risk_key.validate import validate_digest
 
 DOMAIN = "brightwaterfleet.example"
 KEV_MINI = Path(__file__).resolve().parent / "data" / "kev_mini.json"
@@ -46,6 +47,8 @@ class _ScriptedAgentClient:
     def __init__(self, role, mode="standard", **kwargs):
         assert role == "orchestrator", role
         assert mode == "standard", mode
+        self.provider = "meta_model_api"
+        self.model = "muse-wonder-1.0"
         self.total_usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -390,6 +393,93 @@ def test_incidents_receives_forced_company_and_aliases(
         "company_name": "Acme",
         "aliases": ["Acme Corp"],
     }
+
+
+def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "1")
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {
+            "content": "Submitting.",
+            "tool_calls": [
+                _submit(
+                    _finding(),
+                    _finding(
+                        rule_id="EMAIL-DMARC-NONE",
+                        finding_id="F-002",
+                        title="DMARC not enforced",
+                        severity="high",
+                        csf_category="PR.DS",
+                        csf_function="PR",
+                    ),
+                )
+            ],
+        },
+    ]
+    result = run_digest(
+        DOMAIN, "Brightwater Fleet Systems, Inc.", "201-1000", "50M-250M"
+    )
+    digest = json.loads(
+        (Path(result["trace_path"]).parent / "digest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert validate_digest(digest) == []
+    assert digest["schema_version"] == "1.0.0"
+    assert digest["digest_id"] == result["digest_id"]
+    assert digest["target"]["name"] == "Brightwater Fleet Systems, Inc."
+    assert digest["target"]["domain"] == DOMAIN
+    assert digest["mode"]["confidential"] is False
+    assert digest["mode"]["demo"] is True
+    assert digest["mode"]["providers"] == [
+        {
+            "role": "orchestrator",
+            "provider": "meta_model_api",
+            "model": "muse-wonder-1.0",
+        },
+        {
+            "role": "public_records",
+            "provider": "meta_model_api",
+            "model": "muse-spark-1.3",
+        },
+    ]
+    assert digest["inputs"] == {
+        "domain_scan": True,
+        "documents": [],
+        "interviews": [],
+    }
+    assert [f["finding_id"] for f in digest["findings"]] == ["F-001", "F-002"]
+    assert digest["contradictions"] == []
+    assert digest["deal_recommendations"] == []
+    assert digest["narrative"] == {"executive_summary": "Narrative pending."}
+    assert digest["trace_ref"] == result["trace_path"]
+    assert digest["overall"]["rating"] == "A"
+    assert digest["overall"]["deal_signal"] == "proceed_with_conditions"
+    assert digest["overall"]["rating_caps_applied"] == []
+    assert digest["overall"]["confidence"] == "low"
+    by_function = {e["function"]: e for e in digest["function_scores"]}
+    assert by_function["PR"]["score"] == 79.0
+    assert by_function["PR"]["finding_count"] == 2
+    plan = digest["remediation_plan"]
+    assert plan["total_cost_low_usd"] == 10000
+    assert plan["total_cost_high_usd"] == 40000
+    assert "Demo mode: signals from fixtures" in digest["limitations"]
+    assert "No SOC 2 report provided" in digest["limitations"]
+    trace = _read_trace(result)
+    assert any(e["type"] == "scoring_complete" for e in trace)
+    validated = [e for e in trace if e["type"] == "digest_validated"]
+    assert len(validated) == 1
+    assert validated[0]["valid"] is True
 
 
 def test_trace_file_complete_and_ordered(agent_env, monkeypatch):

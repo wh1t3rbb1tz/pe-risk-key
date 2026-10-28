@@ -1,0 +1,246 @@
+{
+  "enumerate_ct_subdomains": {
+    "collection_method": "ct_log_query",
+    "status": "ok",
+    "query_url": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+    "unique_hostnames": 47,
+    "risky_hostnames": [
+      {
+        "hostname": "vpn.brightwaterfleet.example",
+        "pattern": "vpn",
+        "first_seen": "2023-02-11",
+        "last_seen": "2026-09-30"
+      },
+      {
+        "hostname": "jenkins-old.brightwaterfleet.example",
+        "pattern": "jenkins|old",
+        "first_seen": "2021-06-03",
+        "last_seen": "2026-08-14"
+      },
+      {
+        "hostname": "staging-api.brightwaterfleet.example",
+        "pattern": "staging",
+        "first_seen": "2024-01-20",
+        "last_seen": "2026-10-01"
+      },
+      {
+        "hostname": "legacy-portal.brightwaterfleet.example",
+        "pattern": "legacy",
+        "first_seen": "2019-11-05",
+        "last_seen": "2026-07-22"
+      }
+    ],
+    "risky_hostnames_count": 4
+  },
+  "check_email_auth": {
+    "collection_method": "dns_query",
+    "status": "ok",
+    "spf": {
+      "queried_name": "brightwaterfleet.example",
+      "record_type": "TXT",
+      "record": "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all",
+      "qualifier": "~all",
+      "lookup_count": 2
+    },
+    "dmarc": {
+      "queried_name": "_dmarc.brightwaterfleet.example",
+      "record_type": "TXT",
+      "record": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example",
+      "policy": "none",
+      "pct": 100,
+      "rua": true
+    },
+    "dkim": {
+      "selectors_found": [
+        "selector1"
+      ],
+      "selectors_checked": [
+        "default",
+        "selector1",
+        "selector2",
+        "google",
+        "k1",
+        "s1"
+      ],
+      "queried_names": {
+        "default": "default._domainkey.brightwaterfleet.example",
+        "selector1": "selector1._domainkey.brightwaterfleet.example",
+        "selector2": "selector2._domainkey.brightwaterfleet.example",
+        "google": "google._domainkey.brightwaterfleet.example",
+        "k1": "k1._domainkey.brightwaterfleet.example",
+        "s1": "s1._domainkey.brightwaterfleet.example"
+      }
+    }
+  },
+  "check_dnssec": {
+    "collection_method": "dns_query",
+    "status": "ok",
+    "queried_name": "brightwaterfleet.example",
+    "record_type": "DS",
+    "enabled": false
+  },
+  "check_web_posture": {
+    "collection_method": "single_https_get",
+    "status": "ok",
+    "hosts": [
+      {
+        "host": "brightwaterfleet.example",
+        "url": "https://brightwaterfleet.example/",
+        "status": "ok",
+        "status_code": 200,
+        "redirect_location": null,
+        "tls_support": {
+          "TLSv1.0": false,
+          "TLSv1.1": false,
+          "TLSv1.2": "not_tested",
+          "TLSv1.3": true
+        },
+        "tls_versions": [
+          "TLSv1.3"
+        ],
+        "cert": {
+          "issuer": "Example Public CA",
+          "days_remaining": 63,
+          "not_after": "2026-12-30T00:00:00+00:00"
+        },
+        "headers": {
+          "strict-transport-security": null,
+          "content-security-policy": null,
+          "x-frame-options": "SAMEORIGIN",
+          "server": "nginx",
+          "x-powered-by": null
+        },
+        "fingerprints": [
+          {
+            "product": "nginx",
+            "version": null,
+            "kind": "web_server",
+            "source": "server_header",
+            "locators": [
+              "https://brightwaterfleet.example/ (server header)"
+            ],
+            "locator_count": 1
+          }
+        ]
+      },
+      {
+        "host": "www.brightwaterfleet.example",
+        "url": "https://www.brightwaterfleet.example/",
+        "status": "ok",
+        "status_code": 200,
+        "redirect_location": null,
+        "tls_support": {
+          "TLSv1.0": true,
+          "TLSv1.1": true,
+          "TLSv1.2": true,
+          "TLSv1.3": "not_tested"
+        },
+        "tls_versions": [
+          "TLSv1.0",
+          "TLSv1.1",
+          "TLSv1.2"
+        ],
+        "cert": {
+          "issuer": "Example Public CA",
+          "days_remaining": 63,
+          "not_after": "2026-12-30T00:00:00+00:00"
+        },
+        "headers": {
+          "strict-transport-security": null,
+          "content-security-policy": null,
+          "x-frame-options": null,
+          "server": null,
+          "x-powered-by": null
+        },
+        "fingerprints": [
+          {
+            "product": "WordPress",
+            "version": "6.2",
+            "kind": "cms",
+            "source": "meta_generator",
+            "locators": [
+              "https://www.brightwaterfleet.example/ (meta generator tag)"
+            ],
+            "locator_count": 1
+          },
+          {
+            "product": "ExampleGate SSL-VPN",
+            "version": "7.0.11",
+            "kind": "appliance",
+            "source": "asset_path",
+            "locators": [
+              "https://www.brightwaterfleet.example/ (link /examplegate/login)"
+            ],
+            "locator_count": 1
+          }
+        ]
+      }
+    ]
+  },
+  "search_public_incidents": {
+    "collection_method": "search_grounding",
+    "status": "ok",
+    "reason": null,
+    "cached": false,
+    "queries_run": [
+      "Brightwater Fleet Systems, Inc. 8-K Item 1.05 cybersecurity incident",
+      "brightwaterfleet.example breach notice attorney general",
+      "Brightwater Fleet Systems, Inc. security incident notification",
+      "Brightwater Fleet Systems, Inc. data breach"
+    ],
+    "dropped_uncited": 0,
+    "dropped_prohibited_source": 0,
+    "results": [
+      {
+        "type": "state_ag_breach_notice",
+        "date": "2025-08-14",
+        "summary": "Notice filed for unauthorized access to a customer support system; approx. 3,100 individuals notified.",
+        "url": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+        "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+        "entity_match": "exact",
+        "match_basis": "Notice names Brightwater Fleet Systems, Inc. and its brightwaterfleet.example support portal.",
+        "counts_toward_findings": true
+      }
+    ],
+    "disclosed_within_months": 14,
+    "usage": {
+      "searches": 4,
+      "phase1_search": {
+        "prompt_tokens": 1200,
+        "completion_tokens": 800,
+        "cached_tokens": 0
+      },
+      "phase2_extract": {
+        "prompt_tokens": 2500,
+        "completion_tokens": 300,
+        "cached_tokens": 0
+      },
+      "estimated_cost_usd": 0.0193
+    }
+  },
+  "match_known_exploited": {
+    "collection_method": "offline_lookup",
+    "status": "ok",
+    "snapshot_source": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+    "kev_snapshot_date": "2026-10-20",
+    "matches": [
+      {
+        "cve_id": "CVE-PLACEHOLDER-0001",
+        "vendor": "ExampleGate",
+        "product": "ExampleGate SSL-VPN",
+        "matched_fingerprint": {
+          "product": "ExampleGate SSL-VPN",
+          "kind": "appliance",
+          "version": "7.0.11",
+          "host": "www.brightwaterfleet.example",
+          "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)"
+        },
+        "kev_snapshot_date": "2026-10-20",
+        "match_level": "product",
+        "match_tier": "appliance_exposed",
+        "note": "KEV lists products, not affected versions; version not verified."
+      }
+    ],
+    "matches_count": 1
+  }
+}

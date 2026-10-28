@@ -16,6 +16,7 @@ from typing import Any
 import jsonschema
 import yaml
 
+from pe_risk_key.agent.prompts import FINDING_MAPPING
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.providers import ModelClient
 from pe_risk_key.schemas import (
@@ -33,15 +34,11 @@ RUNS_DIR = ROOT / "eval/runs"
 SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"]
 PRICE_PER_M = {"input": 4.0, "cached": 0.20, "output": 20.0}
 
-SYSTEM_PROMPT = """You are a cybersecurity analyst producing triage-grade findings from passive collector signals for a PE deal team. Output a JSON object with a "findings" list.
-
-1. Map collector signals to findings using the rules in scoring.yaml. For each finding, set rule_id, baseline severity, csf_category, and title from the matching rule.
-2. You may adjust severity by at most one level from the baseline, and only with a justification in deal_impact.
-3. Cite evidence using only data in the fixture. Every evidence item must have a specific locator (DNS record, hostname, header name, URL, or version string) and the collection_method recorded in the fixture for that collector. Never invent evidence. Copy evidence locators exactly from the collector output fields (queried_name + record_type, URL, hostname); never construct or shorten them.
-4. Cap KEV-based findings (KEV-POTENTIAL) at confidence medium and phrase them as "potential exposure".
-5. Number findings F-001, F-002, ... and evidence items E-001, E-002, ... uniquely across the response.
-
-Also: set finding source to "outside_in" (evidence source_type "outside_in", except "public_record" for the breach notice) and csf_function to the prefix of csf_category. Fill remediation with a brief summary and effort estimate, but set cost_low_usd, cost_high_usd, and effort_weeks to 0; the engine assigns costs and effort."""
+SYSTEM_PROMPT = (
+    "You are a cybersecurity analyst producing triage-grade findings "
+    'from passive collector signals for a PE deal team. Output a JSON '
+    'object with a "findings" list.\n\n' + FINDING_MAPPING
+)
 
 RESPONSE_SCHEMA = {
     "type": "object",

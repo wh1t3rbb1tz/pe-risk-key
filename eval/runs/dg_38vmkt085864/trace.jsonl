@@ -1,0 +1,41 @@
+{"seq": 1, "ts": "2026-10-28T06:59:29.948093+00:00", "type": "run_start", "domain": "brightwaterfleet.example", "company_name": "Acme", "aliases": ["www"], "employee_band": "201-1000", "revenue_band": "50M-250M", "industry": "test", "mode": "standard"}
+{"seq": 2, "ts": "2026-10-28T06:59:29.981459+00:00", "type": "model_turn_start", "turn": 0}
+{"seq": 3, "ts": "2026-10-28T06:59:32.829722+00:00", "type": "model_turn_end", "turn": 0, "tokens": {"prompt_tokens": 3741, "completion_tokens": 462, "cached_tokens": 0}}
+{"seq": 4, "ts": "2026-10-28T06:59:32.829900+00:00", "type": "plan", "text": "My plan: I\u2019ll run the CT subdomain, DNSSEC, email-auth, web-posture, and public-incident collectors in parallel for brightwaterfleet.example (Acme / www), map each signal to the scoring rules, then only after web posture returns run the KEV matcher to check fingerprints for known-exploited exposure before submitting triage findings."}
+{"seq": 5, "ts": "2026-10-28T06:59:32.830072+00:00", "type": "tool_call_start", "tool": "enumerate_ct_subdomains", "args": {"domain": "brightwaterfleet.example"}, "parallel_group": 1}
+{"seq": 6, "ts": "2026-10-28T06:59:32.830126+00:00", "type": "tool_call_start", "tool": "check_dnssec", "args": {"domain": "brightwaterfleet.example"}, "parallel_group": 1}
+{"seq": 7, "ts": "2026-10-28T06:59:32.830171+00:00", "type": "tool_call_start", "tool": "check_email_auth", "args": {"domain": "brightwaterfleet.example"}, "parallel_group": 1}
+{"seq": 8, "ts": "2026-10-28T06:59:32.830234+00:00", "type": "tool_call_start", "tool": "check_web_posture", "args": {"domain": "brightwaterfleet.example"}, "parallel_group": 1}
+{"seq": 9, "ts": "2026-10-28T06:59:32.830283+00:00", "type": "tool_call_start", "tool": "search_public_incidents", "args": {"domain": "brightwaterfleet.example", "company_name": "Acme", "aliases": ["www"]}, "parallel_group": 1}
+{"seq": 10, "ts": "2026-10-28T06:59:32.830726+00:00", "type": "tool_call_end", "tool": "enumerate_ct_subdomains", "parallel_group": 1, "duration_ms": 0.4, "status": "ok"}
+{"seq": 11, "ts": "2026-10-28T06:59:32.830779+00:00", "type": "tool_call_end", "tool": "check_email_auth", "parallel_group": 1, "duration_ms": 0.3, "status": "ok"}
+{"seq": 12, "ts": "2026-10-28T06:59:32.830854+00:00", "type": "tool_call_end", "tool": "check_dnssec", "parallel_group": 1, "duration_ms": 0.4, "status": "ok"}
+{"seq": 13, "ts": "2026-10-28T06:59:32.830899+00:00", "type": "tool_call_end", "tool": "check_web_posture", "parallel_group": 1, "duration_ms": 0.3, "status": "ok"}
+{"seq": 14, "ts": "2026-10-28T06:59:32.830994+00:00", "type": "tool_call_end", "tool": "search_public_incidents", "parallel_group": 1, "duration_ms": 0.1, "status": "ok"}
+{"seq": 15, "ts": "2026-10-28T06:59:32.831239+00:00", "type": "model_turn_start", "turn": 1}
+{"seq": 16, "ts": "2026-10-28T06:59:35.230280+00:00", "type": "model_turn_end", "turn": 1, "tokens": {"prompt_tokens": 5651, "completion_tokens": 160, "cached_tokens": 0}}
+{"seq": 17, "ts": "2026-10-28T06:59:35.230915+00:00", "type": "tool_call_start", "tool": "match_known_exploited", "args": {"domain": "brightwaterfleet.example"}, "parallel_group": 2}
+{"seq": 18, "ts": "2026-10-28T06:59:35.231431+00:00", "type": "tool_call_end", "tool": "match_known_exploited", "parallel_group": 2, "duration_ms": 0.3, "status": "ok"}
+{"seq": 19, "ts": "2026-10-28T06:59:35.231706+00:00", "type": "model_turn_start", "turn": 2}
+{"seq": 20, "ts": "2026-10-28T06:59:50.959254+00:00", "type": "model_turn_end", "turn": 2, "tokens": {"prompt_tokens": 6021, "completion_tokens": 3387, "cached_tokens": 5620}}
+{"seq": 21, "ts": "2026-10-28T06:59:50.960114+00:00", "type": "submit_findings", "turn": 2, "count": 9}
+{"seq": 22, "ts": "2026-10-28T06:59:50.961147+00:00", "type": "engine_adjustment", "finding_id": "F-001", "field": "remediation.cost_usd", "from": [0, 0], "to": [8000, 30000], "reason": "cost_override"}
+{"seq": 23, "ts": "2026-10-28T06:59:50.961429+00:00", "type": "engine_adjustment", "finding_id": "F-001", "field": "remediation.effort_weeks", "from": 0, "to": 8, "reason": "effort_override"}
+{"seq": 24, "ts": "2026-10-28T06:59:50.961564+00:00", "type": "engine_adjustment", "finding_id": "F-002", "field": "remediation.cost_usd", "from": [0, 0], "to": [2000, 8000], "reason": "cost_override"}
+{"seq": 25, "ts": "2026-10-28T06:59:50.961751+00:00", "type": "engine_adjustment", "finding_id": "F-002", "field": "remediation.effort_weeks", "from": 0, "to": 3, "reason": "effort_override"}
+{"seq": 26, "ts": "2026-10-28T06:59:50.961854+00:00", "type": "engine_adjustment", "finding_id": "F-003", "field": "remediation.cost_usd", "from": [0, 0], "to": [2000, 10000], "reason": "cost_override"}
+{"seq": 27, "ts": "2026-10-28T06:59:50.961952+00:00", "type": "engine_adjustment", "finding_id": "F-003", "field": "remediation.effort_weeks", "from": 0, "to": 2, "reason": "effort_override"}
+{"seq": 28, "ts": "2026-10-28T06:59:50.962044+00:00", "type": "engine_adjustment", "finding_id": "F-004", "field": "remediation.cost_usd", "from": [0, 0], "to": [10000, 50000], "reason": "cost_override"}
+{"seq": 29, "ts": "2026-10-28T06:59:50.962134+00:00", "type": "engine_adjustment", "finding_id": "F-004", "field": "remediation.effort_weeks", "from": 0, "to": 6, "reason": "effort_override"}
+{"seq": 30, "ts": "2026-10-28T06:59:50.962226+00:00", "type": "engine_adjustment", "finding_id": "F-005", "field": "remediation.cost_usd", "from": [0, 0], "to": [5000, 20000], "reason": "cost_override"}
+{"seq": 31, "ts": "2026-10-28T06:59:50.962306+00:00", "type": "engine_adjustment", "finding_id": "F-005", "field": "remediation.effort_weeks", "from": 0, "to": 4, "reason": "effort_override"}
+{"seq": 32, "ts": "2026-10-28T06:59:50.962382+00:00", "type": "engine_adjustment", "finding_id": "F-006", "field": "remediation.cost_usd", "from": [0, 0], "to": [2000, 15000], "reason": "cost_override"}
+{"seq": 33, "ts": "2026-10-28T06:59:50.962459+00:00", "type": "engine_adjustment", "finding_id": "F-006", "field": "remediation.effort_weeks", "from": 0, "to": 4, "reason": "effort_override"}
+{"seq": 34, "ts": "2026-10-28T06:59:50.962534+00:00", "type": "engine_adjustment", "finding_id": "F-007", "field": "remediation.cost_usd", "from": [0, 0], "to": [1000, 5000], "reason": "cost_override"}
+{"seq": 35, "ts": "2026-10-28T06:59:50.962612+00:00", "type": "engine_adjustment", "finding_id": "F-007", "field": "remediation.effort_weeks", "from": 0, "to": 2, "reason": "effort_override"}
+{"seq": 36, "ts": "2026-10-28T06:59:50.962691+00:00", "type": "engine_adjustment", "finding_id": "F-008", "field": "remediation.cost_usd", "from": [0, 0], "to": [25000, 150000], "reason": "cost_override"}
+{"seq": 37, "ts": "2026-10-28T06:59:50.962772+00:00", "type": "engine_adjustment", "finding_id": "F-008", "field": "remediation.effort_weeks", "from": 0, "to": 2, "reason": "effort_override"}
+{"seq": 38, "ts": "2026-10-28T06:59:50.962860+00:00", "type": "engine_adjustment", "finding_id": "F-009", "field": "source", "from": "outside_in", "to": "public_record", "reason": "source"}
+{"seq": 39, "ts": "2026-10-28T06:59:50.963020+00:00", "type": "engine_adjustment", "finding_id": "F-009", "field": "remediation.cost_usd", "from": [0, 0], "to": [25000, 100000], "reason": "cost_override"}
+{"seq": 40, "ts": "2026-10-28T06:59:50.963126+00:00", "type": "engine_adjustment", "finding_id": "F-009", "field": "remediation.effort_weeks", "from": 0, "to": 6, "reason": "effort_override"}
+{"seq": 41, "ts": "2026-10-28T06:59:50.971087+00:00", "type": "run_end", "usage": {"prompt_tokens": 15413, "completion_tokens": 4009, "cached_tokens": 5620, "estimated_cost_usd": 0.120476}}

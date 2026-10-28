@@ -592,6 +592,7 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
             "kind": "web_server",
             "source": "server_header",
             "locators": [f"https://{DOMAIN}/ (server header)"],
+            "locator_count": 1,
         }
     ]
     assert apex["tls_support"] == {
@@ -615,6 +616,7 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
             "kind": "cms",
             "source": "meta_generator",
             "locators": [f"https://www.{DOMAIN}/ (meta generator tag)"],
+            "locator_count": 1,
         },
         {
             "product": "ExampleGate SSL-VPN",
@@ -622,6 +624,7 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
             "kind": "appliance",
             "source": "asset_path",
             "locators": [f"https://www.{DOMAIN}/ (link /examplegate/login)"],
+            "locator_count": 1,
         },
     ]
     assert www["cert"]["issuer"] == "Example Public CA"
@@ -660,10 +663,8 @@ def test_web_posture_merges_products_and_detects_plugins(monkeypatch):
             "locators": [
                 f"{base}/ (meta generator tag)",
                 f"{base}/ (link /wp-login.php)",
-                f"{base}/ (link /wp-content/plugins/duplicator/admin.js?ver=1.5.2)",
-                f"{base}/ (link /wp-content/plugins/duplicator/style.css)",
-                f"{base}/ (link /wp-content/plugins/social-warfare/x.js)",
             ],
+            "locator_count": 2,
         },
         {
             "product": "duplicator",
@@ -674,6 +675,7 @@ def test_web_posture_merges_products_and_detects_plugins(monkeypatch):
                 f"{base}/ (link /wp-content/plugins/duplicator/admin.js?ver=1.5.2)",
                 f"{base}/ (link /wp-content/plugins/duplicator/style.css)",
             ],
+            "locator_count": 2,
         },
         {
             "product": "social-warfare",
@@ -683,6 +685,7 @@ def test_web_posture_merges_products_and_detects_plugins(monkeypatch):
             "locators": [
                 f"{base}/ (link /wp-content/plugins/social-warfare/x.js)"
             ],
+            "locator_count": 1,
         },
     ]
 
@@ -715,7 +718,13 @@ def test_kev_product_match_and_note(monkeypatch):
     assert match["cve_id"] == "CVE-PLACEHOLDER-0001"
     assert match["vendor"] == "ExampleGate"
     assert match["product"] == "ExampleGate SSL-VPN"
-    assert match["matched_fingerprint"] == matched_fp
+    assert match["matched_fingerprint"] == {
+        "product": "examplegate ssl-vpn",
+        "kind": "appliance",
+        "version": "7.0.11",
+        "host": f"www.{DOMAIN}",
+        "locator": f"https://www.{DOMAIN}/ (link /examplegate/login)",
+    }
     assert match["kev_snapshot_date"] == "2026-10-20"
     assert match["match_level"] == "product"
     assert match["match_tier"] == "appliance_exposed"
@@ -815,6 +824,77 @@ def test_kev_dedupes_by_cve_and_host(monkeypatch):
         ("CVE-2024-33333", f"www.{DOMAIN}"),
         ("CVE-2024-33333", DOMAIN),
     }
+
+
+def test_wordpress_page_fixture(monkeypatch):
+    html = (Path(__file__).resolve().parent / "data" / "wordpress_page.html").read_text(
+        encoding="utf-8"
+    )
+    pages = {
+        f"https://{DOMAIN}/": (200, {}, html),
+        f"https://www.{DOMAIN}/": (200, {}, APEX_HTML),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    (apex, _) = web_posture.collect(DOMAIN)["hosts"]
+    base = f"https://{DOMAIN}"
+    by_product = {fp["product"]: fp for fp in apex["fingerprints"]}
+    assert set(by_product) == {
+        "WordPress",
+        "storefront",
+        "woocommerce",
+        "duplicator",
+        "social-warfare",
+        "w3-total-cache",
+    }
+    cms = by_product["WordPress"]
+    assert cms["version"] == "6.4.2" and cms["kind"] == "cms"
+    assert cms["locators"] == [f"{base}/ (meta generator tag)"]
+    assert cms["locator_count"] == 1
+    theme = by_product["storefront"]
+    assert (theme["version"], theme["kind"]) == ("4.5.0", "theme")
+    woo = by_product["woocommerce"]
+    assert woo["version"] == "11.2.1"  # part after wc.
+    assert woo["locator_count"] == 2
+    dup = by_product["duplicator"]
+    assert dup["version"] == "1.5.2"  # highest of 1.5.2 x3, 1.4.0
+    assert len(dup["locators"]) == 3 and dup["locator_count"] == 4
+    assert by_product["social-warfare"]["version"] is None  # 40-hex hash
+    assert by_product["w3-total-cache"]["version"] is None  # digit hash
+    assert all("uploads" not in loc for fp in apex["fingerprints"] for loc in fp["locators"])
+
+
+def test_kev_slim_references_from_detected_fingerprints(monkeypatch):
+    html = (Path(__file__).resolve().parent / "data" / "wordpress_page.html").read_text(
+        encoding="utf-8"
+    )
+    pages = {
+        f"https://{DOMAIN}/": (200, {}, html),
+        f"https://www.{DOMAIN}/": (200, {}, APEX_HTML),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    (apex, _) = web_posture.collect(DOMAIN)["hosts"]
+    fingerprints = [{**fp, "host": DOMAIN} for fp in apex["fingerprints"]]
+    out = kev.collect(DOMAIN, fingerprints=fingerprints)
+    assert {m["cve_id"] for m in out["matches"]} == {
+        "CVE-2024-11111",
+        "CVE-2024-33333",
+        "CVE-2024-44444",
+    }
+    for match in out["matches"]:
+        assert set(match["matched_fingerprint"]) == {
+            "product",
+            "kind",
+            "version",
+            "host",
+            "locator",
+        }
+    dup = next(m for m in out["matches"] if m["cve_id"] == "CVE-2024-33333")
+    assert dup["matched_fingerprint"]["locator"].startswith(f"https://{DOMAIN}/")
 
 
 def test_kev_self_collects_posture(monkeypatch):

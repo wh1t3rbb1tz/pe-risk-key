@@ -40,7 +40,7 @@
         "tls_versions": ["TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 71, "not_after": "2027-01-07T00:00:00+00:00" },
         "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": "Cloudflare", "x-powered-by": null },
-        "fingerprints": [ { "product": "Cloudflare", "version": null, "kind": "cdn_or_proxy", "source": "server_header", "locators": ["https://copperline.example/ (server header)"] } ]
+        "fingerprints": [ { "product": "Cloudflare", "version": null, "kind": "cdn_or_proxy", "source": "server_header", "locators": ["https://copperline.example/ (server header)"], "locator_count": 1 } ]
       },
       {
         "host": "www.copperline.example",

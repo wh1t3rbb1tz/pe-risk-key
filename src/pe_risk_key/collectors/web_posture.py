@@ -31,12 +31,16 @@ TLS_ORDER = ["TLSv1.0", "TLSv1.1", "TLSv1.2", "TLSv1.3"]
 # against link targets found in the fetched page only. Never fetched.
 KNOWN_PATH_PATTERNS = [
     ("/wp-login.php", "WordPress"),
-    ("/wp-content/", "WordPress"),
+    ("/wp-includes/", "WordPress"),
     ("/examplegate/login", "ExampleGate SSL-VPN"),
 ]
 
 PLUGIN_PATH_RE = re.compile(r"/wp-content/plugins/([^/?#]+)", re.IGNORECASE)
-PLUGIN_VERSION_RE = re.compile(r"[?&]ver=([^&#]+)", re.IGNORECASE)
+THEME_PATH_RE = re.compile(r"/wp-content/themes/([^/?#]+)", re.IGNORECASE)
+UPLOADS_PATH_RE = re.compile(r"/wp-content/uploads/", re.IGNORECASE)
+VERSION_PARAM_RE = re.compile(r"[?&]ver=([^&#]+)", re.IGNORECASE)
+VERSION_RE = re.compile(r"^\d+(\.\d+){0,3}([-.+][\w.]+)?$")
+HEX_BLOB_RE = re.compile(r"^[0-9a-fA-F]{7,}$")
 
 CDN_TOKENS = ("cloudflare", "akamai", "fastly", "cloudfront")
 APPLIANCE_TOKENS = ("vpn", "firewall", "gateway")
@@ -75,6 +79,24 @@ def _split_header_product(text: str) -> tuple[str, str | None]:
         product, version = token.split("/", 1)
         return product, version or None
     return token, None
+
+
+def _parse_version(raw: str | None) -> str | None:
+    """Validate a ``?ver=`` value: version-like, not a hash, WC-aware."""
+    if not raw:
+        return None
+    parts = re.split(r"(?i)wc\.", raw, maxsplit=1)
+    candidate = parts[1] if len(parts) == 2 else raw
+    if not VERSION_RE.match(candidate):
+        return None
+    if HEX_BLOB_RE.match(candidate):
+        return None
+    return candidate
+
+
+def _asset_version(href: str) -> str | None:
+    match = VERSION_PARAM_RE.search(href)
+    return _parse_version(match.group(1)) if match else None
 
 
 def _classify_kind(product: str, source: str) -> str:
@@ -123,31 +145,51 @@ def _raw_fingerprints(url: str, headers: dict, body: str) -> list[dict]:
         lowered = href.lower()
         plugin = PLUGIN_PATH_RE.search(href)
         if plugin:
-            slug = plugin.group(1)
-            version_match = PLUGIN_VERSION_RE.search(href)
             add(
-                slug,
-                version_match.group(1) if version_match else None,
+                plugin.group(1),
+                _asset_version(href),
                 "asset_path",
                 f"link {href}",
                 kind="plugin",
             )
+            continue
+        theme = THEME_PATH_RE.search(href)
+        if theme:
+            add(
+                theme.group(1),
+                _asset_version(href),
+                "asset_path",
+                f"link {href}",
+                kind="theme",
+            )
+            continue
+        if UPLOADS_PATH_RE.search(href):
+            continue
         for fragment, product in KNOWN_PATH_PATTERNS:
             if fragment in lowered:
                 add(product, None, "asset_path", f"link {href}")
     return found
 
 
+def _version_key(version: str) -> tuple:
+    match = re.match(r"^(\d+(?:\.\d+)*)(.*)$", version)
+    if not match:
+        return ((), version)
+    numeric = tuple(int(part) for part in match.group(1).split("."))
+    return (numeric, match.group(2))
+
+
 def _best_version(first: str | None, second: str | None) -> str | None:
+    """Highest real version; ties and non-version strings keep the first."""
     if first is None:
         return second
     if second is None:
         return first
-    return second if len(second) > len(first) else first
+    return second if _version_key(second) > _version_key(first) else first
 
 
 def _merge_fingerprints(found: list[dict]) -> list[dict]:
-    """Merge by normalized product: most specific version, union locators."""
+    """Merge by normalized product: highest version, capped locators."""
     merged: dict[str, dict] = {}
     for fingerprint in found:
         key = fingerprint["product"].strip().lower()
@@ -164,6 +206,9 @@ def _merge_fingerprints(found: list[dict]) -> list[dict]:
         for locator in fingerprint["locators"]:
             if locator not in current["locators"]:
                 current["locators"].append(locator)
+    for fingerprint in merged.values():
+        fingerprint["locator_count"] = len(fingerprint["locators"])
+        fingerprint["locators"] = fingerprint["locators"][:3]
     return list(merged.values())
 
 

@@ -91,12 +91,19 @@ def _match_fingerprints(
                 if fingerprint.get("kind") == "appliance"
                 else "product_listed"
             )
+            locators = fingerprint.get("locators") or []
             matches.append(
                 {
                     "cve_id": vuln.get("cveID"),
                     "vendor": vuln.get("vendorProject"),
                     "product": vuln.get("product"),
-                    "matched_fingerprint": fingerprint,
+                    "matched_fingerprint": {
+                        "product": fingerprint.get("product"),
+                        "kind": fingerprint.get("kind"),
+                        "version": fingerprint.get("version"),
+                        "host": fingerprint.get("host"),
+                        "locator": locators[0] if locators else None,
+                    },
                     "kev_snapshot_date": snapshot_date,
                     "match_level": "product",
                     "match_tier": tier,

@@ -49,7 +49,7 @@
         "tls_versions": ["TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 63, "not_after": "2026-12-30T00:00:00+00:00" },
         "headers": { "strict-transport-security": null, "content-security-policy": null, "x-frame-options": "SAMEORIGIN", "server": "nginx", "x-powered-by": null },
-        "fingerprints": [ { "product": "nginx", "version": null, "kind": "web_server", "source": "server_header", "locators": ["https://brightwaterfleet.example/ (server header)"] } ]
+        "fingerprints": [ { "product": "nginx", "version": null, "kind": "web_server", "source": "server_header", "locators": ["https://brightwaterfleet.example/ (server header)"], "locator_count": 1 } ]
       },
       {
         "host": "www.brightwaterfleet.example",
@@ -62,8 +62,8 @@
         "cert": { "issuer": "Example Public CA", "days_remaining": 63, "not_after": "2026-12-30T00:00:00+00:00" },
         "headers": { "strict-transport-security": null, "content-security-policy": null, "x-frame-options": null, "server": null, "x-powered-by": null },
         "fingerprints": [
-          { "product": "WordPress", "version": "6.2", "kind": "cms", "source": "meta_generator", "locators": ["https://www.brightwaterfleet.example/ (meta generator tag)"] },
-          { "product": "ExampleGate SSL-VPN", "version": "7.0.11", "kind": "appliance", "source": "asset_path", "locators": ["https://www.brightwaterfleet.example/ (link /examplegate/login)"] }
+          { "product": "WordPress", "version": "6.2", "kind": "cms", "source": "meta_generator", "locators": ["https://www.brightwaterfleet.example/ (meta generator tag)"], "locator_count": 1 },
+          { "product": "ExampleGate SSL-VPN", "version": "7.0.11", "kind": "appliance", "source": "asset_path", "locators": ["https://www.brightwaterfleet.example/ (link /examplegate/login)"], "locator_count": 1 }
         ]
       }
     ]
@@ -78,7 +78,7 @@
         "cve_id": "CVE-PLACEHOLDER-0001",
         "vendor": "ExampleGate",
         "product": "ExampleGate SSL-VPN",
-        "matched_fingerprint": { "host": "www.brightwaterfleet.example", "product": "ExampleGate SSL-VPN", "version": "7.0.11", "kind": "appliance", "source": "asset_path", "locators": ["https://www.brightwaterfleet.example/ (link /examplegate/login)"] },
+        "matched_fingerprint": { "product": "ExampleGate SSL-VPN", "kind": "appliance", "version": "7.0.11", "host": "www.brightwaterfleet.example", "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)" },
         "kev_snapshot_date": "2026-10-20",
         "match_level": "product",
         "match_tier": "appliance_exposed",

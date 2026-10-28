@@ -1,10 +1,11 @@
 """Deterministic rule constraints (SPEC §4.5, scoring.yaml).
 
 The model proposes findings; this module clamps them to the matching
-rule's bounds so the same signals always produce the same floor. Every
-change (and every unmatchable finding) is recorded as an adjustment
-dict ``{finding_id, field, from, to, reason}`` for the dashboard trace
-panel. Inputs are never mutated.
+rule's bounds so the same signals always produce the same floor:
+confidence, severity (within one level of baseline), CSF category, and
+remediation cost bands. Every change (and every unmatchable finding) is
+recorded as an adjustment dict ``{finding_id, field, from, to, reason}``
+for the dashboard trace panel. Inputs are never mutated.
 """
 
 from __future__ import annotations
@@ -17,19 +18,24 @@ CONFIDENCE_ORDER = ["low", "medium", "high"]
 
 
 def apply_rule_constraints(
-    findings: list[dict[str, Any]], scoring_config: dict[str, Any]
+    findings: list[dict[str, Any]],
+    scoring_config: dict[str, Any],
+    employee_band: str | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Clamp findings to their scoring.yaml rule bounds.
 
-    Returns ``(constrained_findings, adjustments)``. Findings whose
-    ``rule_id`` matches no rule are kept unchanged and recorded with
-    reason ``unknown_rule``.
+    ``employee_band`` (from the target record) enables the remediation
+    cost lookup; when omitted, costs are left untouched. Returns
+    ``(constrained_findings, adjustments)``. Findings whose ``rule_id``
+    matches no rule are kept unchanged and recorded with reason
+    ``unknown_rule``.
     """
     rules = {
         rule["id"]: rule
         for rule in scoring_config.get("rules", [])
         if isinstance(rule, dict) and "id" in rule
     }
+    cost_bands = scoring_config.get("cost_bands_usd", {})
     constrained: list[dict[str, Any]] = []
     adjustments: list[dict[str, Any]] = []
     for finding in findings:
@@ -54,8 +60,55 @@ def apply_rule_constraints(
         _clamp_confidence(updated, finding_id, rule, adjustments)
         _clamp_severity(updated, finding_id, rule, adjustments)
         _apply_csf(updated, finding_id, rule, adjustments)
+        _apply_cost(updated, finding_id, rule, cost_bands, employee_band, adjustments)
         constrained.append(updated)
     return constrained, adjustments
+
+
+def _is_cost_pair(value: Any) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) == 2
+        and all(isinstance(v, (int, float)) for v in value)
+    )
+
+
+def _apply_cost(
+    finding: dict[str, Any],
+    finding_id: Any,
+    rule: dict[str, Any],
+    cost_bands: Any,
+    employee_band: str | None,
+    adjustments: list[dict[str, Any]],
+) -> None:
+    remediation = finding.get("remediation")
+    if not isinstance(remediation, dict):
+        return
+    override = rule.get("cost_override_usd")
+    if _is_cost_pair(override):
+        low, high = override
+    elif employee_band is not None and isinstance(cost_bands, dict):
+        band = cost_bands.get(employee_band)
+        pair = band.get(finding.get("severity")) if isinstance(band, dict) else None
+        if not _is_cost_pair(pair):
+            return
+        low, high = pair
+    else:
+        return
+    old = [remediation.get("cost_low_usd"), remediation.get("cost_high_usd")]
+    if old == [low, high]:
+        return
+    remediation["cost_low_usd"] = low
+    remediation["cost_high_usd"] = high
+    adjustments.append(
+        {
+            "finding_id": finding_id,
+            "field": "remediation.cost_usd",
+            "from": old,
+            "to": [low, high],
+            "reason": "cost_band",
+        }
+    )
 
 
 def _clamp_confidence(

@@ -110,6 +110,12 @@ cost_bands_usd:
 # Collectors and analyzers emit signals. Rules map known signals to a
 # baseline severity and CSF category. The model may raise or lower severity
 # by at most one level and must justify it in deal_impact.
+# Optional per-rule fields:
+#   max_confidence:   cap on finding confidence (e.g. fingerprint-based rules
+#                     whose evidence can never be high-confidence).
+#   cost_override_usd: [low, high] remediation cost in USD. Overrides the
+#                      cost_bands_usd[employee_band][severity] lookup for
+#                      this rule.
 rules:
   # Email and DNS
   - id: EMAIL-DMARC-NONE

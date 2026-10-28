@@ -97,6 +97,7 @@ def validate_findings(findings: list[dict]) -> list[dict]:
                     "rule_id": None,
                     "severity": "?",
                     "valid": False,
+                    "stripped": None,
                     "errors": ["finding is not an object"],
                 }
             )
@@ -111,6 +112,7 @@ def validate_findings(findings: list[dict]) -> list[dict]:
                 "rule_id": stripped.get("rule_id"),
                 "severity": stripped.get("severity", "?"),
                 "valid": not errors,
+                "stripped": stripped,
                 "errors": [f"{e.json_path}: {e.message}" for e in errors],
             }
         )
@@ -225,8 +227,9 @@ def main() -> int:
     except (jsonschema.ValidationError, ValueError) as exc:
         print(f"FATAL: structured output failed validation twice: {exc}")
         return 1
+    employee_band = fixture.get("target", {}).get("employee_band")
     findings, adjustments = apply_rule_constraints(
-        parsed.get("findings", []), scoring
+        parsed.get("findings", []), scoring, employee_band
     )
     results = validate_findings(findings)
     summary = score(results, expected_entries, must_not_find)
@@ -240,7 +243,15 @@ def main() -> int:
                 "created_at": stamp,
                 "model": client.model,
                 "usage": client.total_usage,
-                "response": parsed,
+                "response_raw": parsed,
+                "response_final": {
+                    "findings": [
+                        r["stripped"]
+                        for r in results
+                        if r["valid"] and r["stripped"] is not None
+                    ]
+                },
+                "adjustments": adjustments,
             },
             indent=2,
         ),

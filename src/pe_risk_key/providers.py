@@ -135,6 +135,11 @@ class ModelClient:
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
         self.jitter = jitter
+        self.total_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+        }
         self._api_key = resolved_key
         self._timeout = timeout
         # SDK-level retries are disabled: this class owns the 429 retry policy
@@ -199,10 +204,30 @@ class ModelClient:
     def chat(
         self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Any:
-        """Chat completion with the role's model; retries on HTTP 429."""
+        """Chat completion with the role's model; retries on HTTP 429.
+
+        Token usage accumulates on ``self.total_usage`` across calls.
+        """
         kwargs.setdefault("model", self.model)
-        return self._with_retry(
+        response = self._with_retry(
             self._client.chat.completions.create, messages=messages, **kwargs
+        )
+        self._accumulate_usage(response)
+        return response
+
+    def _accumulate_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        details = getattr(usage, "prompt_tokens_details", None)
+        self.total_usage["prompt_tokens"] += (
+            getattr(usage, "prompt_tokens", 0) or 0
+        )
+        self.total_usage["completion_tokens"] += (
+            getattr(usage, "completion_tokens", 0) or 0
+        )
+        self.total_usage["cached_tokens"] += (
+            getattr(details, "cached_tokens", 0) or 0
         )
 
     def chat_json(

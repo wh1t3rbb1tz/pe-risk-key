@@ -5,7 +5,11 @@ import json
 import jsonschema
 import pytest
 
-from pe_risk_key.schemas import strict_subschema, subschema
+from pe_risk_key.schemas import (
+    strict_subschema,
+    strip_nullable_optionals,
+    subschema,
+)
 from pe_risk_key.validate import SCHEMA_PATH
 
 
@@ -90,10 +94,8 @@ def test_strict_subschema_widens_optional_to_nullable():
     assert evidence["properties"]["collector"]["type"] == ["string", "null"]
 
 
-def test_original_and_strict_accept_their_shapes():
-    original = subschema("finding")
-    strict = strict_subschema("finding")
-    base = {
+def _finding() -> dict:
+    return {
         "finding_id": "F-001",
         "title": "DMARC policy missing",
         "severity": "medium",
@@ -118,6 +120,12 @@ def test_original_and_strict_accept_their_shapes():
             "effort_weeks": 1,
         },
     }
+
+
+def test_original_and_strict_accept_their_shapes():
+    original = subschema("finding")
+    strict = strict_subschema("finding")
+    base = _finding()
     jsonschema.Draft202012Validator(original).validate(base)
     strict_instance = {
         **base,
@@ -133,3 +141,51 @@ def test_original_and_strict_accept_their_shapes():
         jsonschema.Draft202012Validator(strict).validate(base)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.Draft202012Validator(original).validate(strict_instance)
+
+
+def test_strip_removes_top_level_optional_null():
+    finding = {**_finding(), "rule_id": None}
+    cleaned = strip_nullable_optionals(finding, "finding")
+    assert "rule_id" not in cleaned
+    assert cleaned == _finding()
+    assert finding["rule_id"] is None  # input not mutated
+
+
+def test_strip_removes_nested_optional_null():
+    finding = _finding()
+    finding["evidence"][0]["collector"] = None
+    finding["evidence"][0]["collected_at"] = None
+    cleaned = strip_nullable_optionals(finding, "finding")
+    assert cleaned["evidence"][0] == _finding()["evidence"][0]
+
+
+def test_strip_handles_arrays_item_by_item():
+    finding = _finding()
+    second = {**_finding()["evidence"][0], "evidence_id": "E-002"}
+    finding["evidence"].append(second)
+    finding["evidence"][0]["collector"] = None
+    finding["remediation"]["effort_weeks"] = 2  # non-null values untouched
+    cleaned = strip_nullable_optionals(finding, "finding")
+    assert "collector" not in cleaned["evidence"][0]
+    assert cleaned["evidence"][1] == second
+    assert cleaned["remediation"]["effort_weeks"] == 2
+
+
+def test_strip_preserves_required_null_for_validation():
+    finding = {**_finding(), "title": None, "rule_id": None}
+    cleaned = strip_nullable_optionals(finding, "finding")
+    assert cleaned["title"] is None  # still caught by validation
+    assert "rule_id" not in cleaned
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.Draft202012Validator(subschema("finding")).validate(cleaned)
+
+
+def test_strip_keeps_non_null_optionals():
+    finding = {**_finding(), "rule_id": "EMAIL-DMARC-ABSENT"}
+    cleaned = strip_nullable_optionals(finding, "finding")
+    assert cleaned["rule_id"] == "EMAIL-DMARC-ABSENT"
+
+
+def test_strip_unknown_definition():
+    with pytest.raises(KeyError, match="nope"):
+        strip_nullable_optionals({}, "nope")

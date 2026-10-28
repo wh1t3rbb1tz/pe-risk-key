@@ -273,10 +273,34 @@ def test_transcribe_non_429_not_retried(monkeypatch):
     assert sleeps == []
 
 
-def _chat_response(content: str):
+def _chat_response(content: str, usage=None):
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=usage,
     )
+
+
+def test_chat_accumulates_token_usage(monkeypatch):
+    client = _client()
+
+    def fake_create(**kwargs):
+        return _chat_response(
+            "hi",
+            usage=SimpleNamespace(
+                prompt_tokens=10,
+                completion_tokens=5,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=2),
+            ),
+        )
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    client.chat([{"role": "user", "content": "hi"}])
+    client.chat([{"role": "user", "content": "hi"}])
+    assert client.total_usage == {
+        "prompt_tokens": 20,
+        "completion_tokens": 10,
+        "cached_tokens": 4,
+    }
 
 
 THING_SCHEMA = {

@@ -41,6 +41,38 @@ def strict_subschema(def_name: str) -> dict[str, Any]:
     return _strict_transform(subschema(def_name))
 
 
+def strip_nullable_optionals(obj: Any, def_name: str) -> Any:
+    """Drop null-valued optional fields from strict-mode output.
+
+    Under strict mode the model emits explicit ``null`` for absent
+    optional fields; the original definition wants them absent instead.
+    Fields that are ``required`` in the original definition are left
+    alone (even when null) so validation still catches them. Returns a
+    new object; the input is not mutated.
+    """
+    return _strip_nulls(obj, subschema(def_name))
+
+
+def _strip_nulls(node: Any, schema: Any) -> Any:
+    if isinstance(node, dict) and isinstance(schema, dict):
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return node
+        required = set(schema.get("required") or [])
+        cleaned = {}
+        for key, value in node.items():
+            if value is None and key not in required:
+                continue
+            cleaned[key] = _strip_nulls(value, properties.get(key))
+        return cleaned
+    if isinstance(node, list) and isinstance(schema, dict):
+        items = schema.get("items")
+        if not isinstance(items, dict):
+            return node
+        return [_strip_nulls(item, items) for item in node]
+    return node
+
+
 def _pointer_target(root: dict[str, Any], ref: str) -> Any:
     if not ref.startswith("#/"):
         raise ValueError(f"Only local refs are supported, got {ref!r}.")

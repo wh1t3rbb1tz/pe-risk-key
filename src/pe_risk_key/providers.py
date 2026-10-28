@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -28,7 +29,13 @@ from typing import Any, BinaryIO, Literal
 import httpx
 import jsonschema
 from dotenv import load_dotenv
-from openai import APIStatusError, OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 
 load_dotenv()
 
@@ -62,6 +69,7 @@ ROLE_MODELS: dict[str, str] = {
 }
 
 _RETRYABLE_STATUS = 429
+_TRANSIENT_STATUSES = frozenset({500, 502, 503, 504})
 
 
 class ModelClient:
@@ -75,8 +83,11 @@ class ModelClient:
         api_key: Explicit API key; defaults to the mode's env var.
         base_url: Explicit base URL; defaults to the mode's base URL.
         model: Explicit model; defaults to the role's model.
-        timeout: Per-request timeout in seconds.
+        timeout: Per-request timeout in seconds. Defaults to
+            ``MODEL_TIMEOUT_SECONDS``, falling back to 300.
         max_retries: Retries on HTTP 429 after the initial attempt.
+        transient_retries: Retries on timeouts, connection errors, and
+            retryable 5xx after the initial attempt.
         backoff_base: Base delay in seconds; attempt ``n`` waits
             ``backoff_base * 2**n`` plus jitter.
         backoff_cap: Maximum backoff delay in seconds (before jitter).
@@ -91,8 +102,9 @@ class ModelClient:
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         max_retries: int = 5,
+        transient_retries: int = 2,
         backoff_base: float = 1.0,
         backoff_cap: float = 60.0,
         jitter: float = 1.0,
@@ -132,6 +144,7 @@ class ModelClient:
         self.base_url = base_url or STANDARD_BASE_URL
         self.model = resolved_model
         self.max_retries = max_retries
+        self.transient_retries = transient_retries
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
         self.jitter = jitter
@@ -141,11 +154,17 @@ class ModelClient:
             "cached_tokens": 0,
         }
         self._api_key = resolved_key
-        self._timeout = timeout
-        # SDK-level retries are disabled: this class owns the 429 retry policy
+        self._timeout = (
+            timeout
+            if timeout is not None
+            else float(os.getenv("MODEL_TIMEOUT_SECONDS", "300"))
+        )
+        # SDK-level retries are disabled: this class owns the retry policy
         # (exponential backoff + jitter, honoring Retry-After) below.
         self._client = OpenAI(
-            api_key=resolved_key, base_url=self.base_url, timeout=timeout,
+            api_key=resolved_key,
+            base_url=self.base_url,
+            timeout=self._timeout,
             max_retries=0,
         )
 
@@ -162,11 +181,9 @@ class ModelClient:
         time.sleep(delay)
 
     @staticmethod
-    def _retry_after_seconds(
-        exc: APIStatusError | httpx.HTTPStatusError,
-    ) -> float | None:
+    def _retry_after_seconds(exc: Exception) -> float | None:
         try:
-            raw = exc.response.headers.get("retry-after")
+            raw = exc.response.headers.get("retry-after")  # type: ignore[attr-defined]
         except Exception:  # defensive: never fail retry handling on headers
             return None
         if raw is None:
@@ -176,39 +193,90 @@ class ModelClient:
         except ValueError:
             return None
 
+    def _log_retry(self, reason: str, attempt: int) -> None:
+        print(
+            f"[ModelClient:{self.role}] retry {attempt + 1} ({reason})",
+            file=sys.stderr,
+        )
+
+    def _classify_retry(
+        self, exc: Exception
+    ) -> tuple[str, str, float | None] | None:
+        """Classify a failure as (budget, reason, retry_after).
+
+        Returns ``None`` for failures that must not be retried (4xx other
+        than 429). ``RateLimitError`` is checked before ``APIStatusError``,
+        its parent.
+        """
+        if isinstance(exc, RateLimitError):
+            return ("rate", "HTTP 429", self._retry_after_seconds(exc))
+        if isinstance(exc, APIStatusError):
+            if exc.status_code == _RETRYABLE_STATUS:
+                return ("rate", "HTTP 429", self._retry_after_seconds(exc))
+            if exc.status_code in _TRANSIENT_STATUSES:
+                return (
+                    "transient",
+                    f"HTTP {exc.status_code}",
+                    self._retry_after_seconds(exc),
+                )
+            return None
+        if isinstance(exc, APITimeoutError):
+            return ("transient", "timeout", None)
+        if isinstance(exc, APIConnectionError):
+            return ("transient", "connection error", None)
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            if status == _RETRYABLE_STATUS:
+                return ("rate", "HTTP 429", self._retry_after_seconds(exc))
+            if status in _TRANSIENT_STATUSES:
+                return (
+                    "transient",
+                    f"HTTP {status}",
+                    self._retry_after_seconds(exc),
+                )
+            return None
+        return None
+
     def _with_retry(self, func: Any, *args: Any, **kwargs: Any) -> Any:
-        attempt = 0
+        attempts = {"rate": 0, "transient": 0}
+        budgets = {"rate": self.max_retries, "transient": self.transient_retries}
         while True:
             try:
                 return func(*args, **kwargs)
-            except RateLimitError as exc:
-                if attempt >= self.max_retries:
+            except (
+                RateLimitError,
+                APIStatusError,
+                APITimeoutError,
+                APIConnectionError,
+                httpx.HTTPStatusError,
+            ) as exc:
+                classified = self._classify_retry(exc)
+                if classified is None:
                     raise
-                self._wait(attempt, self._retry_after_seconds(exc))
-                attempt += 1
-            except APIStatusError as exc:
-                if exc.status_code != _RETRYABLE_STATUS:
+                kind, reason, retry_after = classified
+                if attempts[kind] >= budgets[kind]:
                     raise
-                if attempt >= self.max_retries:
-                    raise
-                self._wait(attempt, self._retry_after_seconds(exc))
-                attempt += 1
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != _RETRYABLE_STATUS:
-                    raise
-                if attempt >= self.max_retries:
-                    raise
-                self._wait(attempt, self._retry_after_seconds(exc))
-                attempt += 1
+                self._log_retry(reason, attempts[kind])
+                self._wait(attempts[kind], retry_after)
+                attempts[kind] += 1
 
     def chat(
-        self, messages: list[dict[str, Any]], **kwargs: Any
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        reasoning_effort: str | None = None,
+        **kwargs: Any,
     ) -> Any:
-        """Chat completion with the role's model; retries on HTTP 429.
+        """Chat completion with the role's model; retries on 429/transients.
 
-        Token usage accumulates on ``self.total_usage`` across calls.
+        ``reasoning_effort`` is passed through as the top-level request
+        parameter (minimal/low/medium/high/xhigh/max per
+        https://dev.meta.ai/docs/reasoning). Token usage accumulates on
+        ``self.total_usage`` across calls.
         """
         kwargs.setdefault("model", self.model)
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
         response = self._with_retry(
             self._client.chat.completions.create, messages=messages, **kwargs
         )
@@ -236,6 +304,7 @@ class ModelClient:
         *,
         schema: dict[str, Any] | None = None,
         schema_name: str = "response",
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """Chat completion parsed as JSON.
@@ -247,7 +316,10 @@ class ModelClient:
         and retries once with the validation errors appended on failure.
         Raises the validation error if the second attempt also fails.
         Without ``schema``, falls back to unconstrained ``json_object``.
+        ``reasoning_effort`` passes through to :meth:`chat`.
         """
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
         if schema is None:
             kwargs["response_format"] = {"type": "json_object"}
             response = self.chat(messages, **kwargs)

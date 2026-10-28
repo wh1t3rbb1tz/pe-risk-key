@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import httpx
 import jsonschema
 import pytest
-from openai import APIStatusError, RateLimitError
+from openai import APIStatusError, APITimeoutError, RateLimitError
 
 from pe_risk_key.providers import ROLE_MODELS, SPARK_MODEL, ModelClient
 
@@ -29,6 +29,11 @@ def _status_error(status: int) -> APIStatusError:
     return APIStatusError(
         f"http {status}", response=_response(status), body=None
     )
+
+
+def _timeout_error() -> APITimeoutError:
+    request = httpx.Request("POST", "https://api.meta.ai/v1/chat/completions")
+    return APITimeoutError(request=request)
 
 
 def _client(**overrides):
@@ -137,7 +142,7 @@ def test_non_429_errors_not_retried(monkeypatch):
 
     def fake_create(**kwargs):
         calls["n"] += 1
-        raise _status_error(500)
+        raise _status_error(403)
 
     monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
     with pytest.raises(APIStatusError):
@@ -264,7 +269,7 @@ def test_transcribe_non_429_not_retried(monkeypatch):
 
     def fake_post(url, **kwargs):
         calls["n"] += 1
-        return _http_response(500)
+        return _http_response(403)
 
     monkeypatch.setattr("httpx.post", fake_post)
     with pytest.raises(httpx.HTTPStatusError):
@@ -387,3 +392,104 @@ def test_chat_json_raises_after_second_failure(monkeypatch):
             schema_name="T",
         )
     assert len(calls) == 2
+
+
+def test_chat_retries_timeout_then_succeeds(monkeypatch, capsys):
+    client = _client(backoff_base=1.0)
+    sleeps: list[float] = []
+    monkeypatch.setattr("pe_risk_key.providers.time.sleep", sleeps.append)
+    calls = {"n": 0}
+
+    def fake_create(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _timeout_error()
+        return "ok"
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    assert client.chat([{"role": "user", "content": "hi"}]) == "ok"
+    assert calls["n"] == 2
+    assert sleeps == [1.0]
+    err = capsys.readouterr().err
+    assert "retry 1" in err and "timeout" in err
+
+
+def test_chat_retries_503_then_succeeds(monkeypatch, capsys):
+    client = _client(backoff_base=0.5)
+    sleeps: list[float] = []
+    monkeypatch.setattr("pe_risk_key.providers.time.sleep", sleeps.append)
+    calls = {"n": 0}
+
+    def fake_create(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _status_error(503)
+        return "ok"
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    assert client.chat([{"role": "user", "content": "hi"}]) == "ok"
+    assert calls["n"] == 2
+    assert sleeps == [0.5]
+    assert "HTTP 503" in capsys.readouterr().err
+
+
+def test_transient_retries_exhausted_reraises(monkeypatch):
+    client = _client(backoff_base=0.1)  # default: 2 transient retries
+    sleeps: list[float] = []
+    monkeypatch.setattr("pe_risk_key.providers.time.sleep", sleeps.append)
+    calls = {"n": 0}
+
+    def fake_create(**kwargs):
+        calls["n"] += 1
+        raise _status_error(503)
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    with pytest.raises(APIStatusError):
+        client.chat([{"role": "user", "content": "hi"}])
+    assert calls["n"] == 3  # initial attempt + 2 retries
+    assert len(sleeps) == 2
+
+
+def test_400_not_retried(monkeypatch):
+    client = _client(max_retries=3)
+    sleeps: list[float] = []
+    monkeypatch.setattr("pe_risk_key.providers.time.sleep", sleeps.append)
+    calls = {"n": 0}
+
+    def fake_create(**kwargs):
+        calls["n"] += 1
+        raise _status_error(400)
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    with pytest.raises(APIStatusError):
+        client.chat([{"role": "user", "content": "hi"}])
+    assert calls["n"] == 1
+    assert sleeps == []
+
+
+def test_reasoning_effort_passthrough(monkeypatch):
+    client = _client()
+    captured: dict = {}
+
+    def fake_create(*, messages, **kwargs):
+        captured.update(kwargs)
+        return _chat_response('{"a": "ok"}')
+
+    monkeypatch.setattr(client.client.chat.completions, "create", fake_create)
+    client.chat([{"role": "user", "content": "hi"}], reasoning_effort="medium")
+    assert captured["reasoning_effort"] == "medium"
+    client.chat_json(
+        [{"role": "user", "content": "hi"}],
+        schema=THING_SCHEMA,
+        schema_name="T",
+        reasoning_effort="low",
+    )
+    assert captured["reasoning_effort"] == "low"
+
+
+def test_timeout_config_default_env_and_override(monkeypatch):
+    monkeypatch.delenv("MODEL_TIMEOUT_SECONDS", raising=False)
+    assert _client()._timeout == 300.0
+    monkeypatch.setenv("MODEL_TIMEOUT_SECONDS", "45")
+    assert _client()._timeout == 45.0
+    assert _client(timeout=10.0)._timeout == 10.0

@@ -223,6 +223,7 @@ def main() -> int:
             build_messages(fixture, scoring),
             schema=RESPONSE_SCHEMA,
             schema_name="Findings",
+            reasoning_effort="medium",
         )
     except (jsonschema.ValidationError, ValueError) as exc:
         print(f"FATAL: structured output failed validation twice: {exc}")

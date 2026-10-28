@@ -311,7 +311,112 @@ def test_cost_skipped_for_unknown_rule():
     assert [a["reason"] for a in adjustments] == ["unknown_rule"]
 
 
-def test_every_expected_rule_has_cost_override():
+def _config_with_effort(weeks):
+    rule = {**CONFIG["rules"][1], "effort_weeks_override": weeks}
+    return {
+        "rules": [rule],
+        "cost_bands_usd": CONFIG["cost_bands_usd"],
+        "cost_size_multiplier": CONFIG["cost_size_multiplier"],
+    }
+
+
+def test_effort_override_sets_weeks_unscaled():
+    config = _config_with_effort(6)
+    for band in ("201-1000", "5000+"):
+        findings, adjustments = apply_rule_constraints(
+            [_finding(remediation=_remediation(10000, 50000))], config, band
+        )
+        assert findings[0]["remediation"]["effort_weeks"] == 6
+        assert adjustments == [
+            {
+                "finding_id": "F-001",
+                "field": "remediation.effort_weeks",
+                "from": 3,
+                "to": 6,
+                "reason": "effort_override",
+            }
+        ]
+
+
+def test_effort_kept_without_override():
+    findings, adjustments = apply_rule_constraints(
+        [_finding(remediation=_remediation())], CONFIG, "201-1000"
+    )
+    assert findings[0]["remediation"]["effort_weeks"] == 3
+    assert all(a["reason"] != "effort_override" for a in adjustments)
+
+
+def test_source_derived_public_record():
+    finding = _finding(
+        source="outside_in",
+        evidence=[{"source_type": "outside_in"}, {"source_type": "public_record"}],
+    )
+    findings, adjustments = apply_rule_constraints([finding], CONFIG, "201-1000")
+    assert findings[0]["source"] == "public_record"
+    assert adjustments == [
+        {
+            "finding_id": "F-001",
+            "field": "source",
+            "from": "outside_in",
+            "to": "public_record",
+            "reason": "source",
+        }
+    ]
+
+
+def test_source_kept_when_document_or_interview_evidence_present():
+    for other in ("document", "interview"):
+        finding = _finding(
+            source="outside_in",
+            evidence=[{"source_type": "public_record"}, {"source_type": other}],
+        )
+        findings, adjustments = apply_rule_constraints(
+            [finding], CONFIG, "201-1000"
+        )
+        assert findings[0]["source"] == "outside_in"
+        assert adjustments == []
+
+
+def test_source_derived_document_for_soc2_rule():
+    config = {
+        "rules": [
+            {"id": "SOC2-EXCEPTION-ACCESS", "severity": "high", "csf": "PR.AA"}
+        ],
+        "cost_bands_usd": CONFIG["cost_bands_usd"],
+        "cost_size_multiplier": CONFIG["cost_size_multiplier"],
+    }
+    finding = _finding(
+        rule_id="SOC2-EXCEPTION-ACCESS",
+        severity="high",
+        csf_category="PR.AA",
+        source="outside_in",
+        evidence=[{"source_type": "document"}],
+        remediation=_remediation(40000, 150000),
+    )
+    findings, adjustments = apply_rule_constraints([finding], config, "201-1000")
+    assert findings[0]["source"] == "document"
+    assert adjustments == [
+        {
+            "finding_id": "F-001",
+            "field": "source",
+            "from": "outside_in",
+            "to": "document",
+            "reason": "source",
+        }
+    ]
+
+
+def test_source_unchanged_when_already_correct():
+    finding = _finding(
+        source="public_record",
+        evidence=[{"source_type": "public_record"}],
+    )
+    findings, adjustments = apply_rule_constraints([finding], CONFIG, "201-1000")
+    assert findings[0]["source"] == "public_record"
+    assert adjustments == []
+
+
+def _repo_files():
     root = Path(__file__).resolve().parents[1]
     scoring = yaml.safe_load((root / "scoring.yaml").read_text(encoding="utf-8"))
     expected = yaml.safe_load(
@@ -319,6 +424,11 @@ def test_every_expected_rule_has_cost_override():
             encoding="utf-8"
         )
     )
+    return scoring, expected
+
+
+def test_every_expected_rule_has_cost_override():
+    scoring, expected = _repo_files()
     by_id = {rule["id"]: rule for rule in scoring["rules"]}
     rule_ids = {entry["rule_id"] for entry in expected["expected_findings"]}
     assert len(rule_ids) == 14  # SOC2-EXCEPTION-ACCESS covers two controls
@@ -327,6 +437,22 @@ def test_every_expected_rule_has_cost_override():
         assert isinstance(override, list) and len(override) == 2, rule_id
         assert all(isinstance(v, (int, float)) for v in override), rule_id
         assert 0 <= override[0] <= override[1], rule_id
+
+
+def test_every_expected_rule_has_effort_override():
+    scoring, expected = _repo_files()
+    by_id = {rule["id"]: rule for rule in scoring["rules"]}
+    rule_ids = {entry["rule_id"] for entry in expected["expected_findings"]}
+    for rule_id in sorted(rule_ids):
+        weeks = by_id[rule_id].get("effort_weeks_override")
+        assert isinstance(weeks, (int, float)) and weeks >= 0, rule_id
+
+
+def test_surface_rules_cap_confidence_at_medium():
+    scoring, _ = _repo_files()
+    by_id = {rule["id"]: rule for rule in scoring["rules"]}
+    assert by_id["SURFACE-RISKY-HOSTS"]["max_confidence"] == "medium"
+    assert by_id["SURFACE-SPRAWL"]["max_confidence"] == "medium"
 
 
 def test_inputs_not_mutated():

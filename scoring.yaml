@@ -128,6 +128,8 @@ cost_size_multiplier:
 #   cost_override_usd: [low, high] remediation cost in USD. Overrides the
 #                      cost_bands_usd[employee_band][severity] lookup for
 #                      this rule.
+#   effort_weeks_override: fixed remediation effort in weeks. Not scaled
+#                      by cost_size_multiplier.
 rules:
   # Email and DNS
   - id: EMAIL-DMARC-NONE
@@ -136,6 +138,7 @@ rules:
     csf: PR.DS
     title: "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud"
     cost_override_usd: [8000, 30000]  # basis: DMARC reporting tool + staged move to reject
+    effort_weeks_override: 8
   - id: EMAIL-DMARC-MISSING
     match: "dmarc.record is null"
     severity: high
@@ -147,26 +150,32 @@ rules:
     csf: PR.DS
     title: "SPF uses soft/neutral fail"
     cost_override_usd: [2000, 8000]  # basis: sender inventory, record change
+    effort_weeks_override: 3
   - id: DNS-NO-DNSSEC
     match: "dnssec.enabled == false"
     severity: low
     csf: PR.PS
     title: "DNSSEC not enabled"
     cost_override_usd: [2000, 10000]  # basis: provider/registrar enablement
+    effort_weeks_override: 2
 
   # Attack surface
   - id: SURFACE-RISKY-HOSTS
     match: "ct.risky_hostnames_count >= 1"
     severity: medium
+    max_confidence: medium  # CT log presence doesn't confirm a live host
     csf: ID.AM
     title: "Publicly logged hostnames suggest exposed admin/legacy/staging systems"
     cost_override_usd: [10000, 50000]  # basis: inventory, decommission or move behind ZTNA
+    effort_weeks_override: 6
   - id: SURFACE-SPRAWL
     match: "ct.unique_hostnames > 40"
     severity: low
+    max_confidence: medium  # CT log presence doesn't confirm a live host
     csf: ID.AM
     title: "Large certificate footprint relative to company size"
     cost_override_usd: [5000, 20000]  # basis: asset inventory, cert hygiene
+    effort_weeks_override: 4
 
   # Web posture
   - id: WEB-LEGACY-TLS
@@ -175,12 +184,14 @@ rules:
     csf: PR.DS
     title: "Deprecated TLS versions offered"
     cost_override_usd: [2000, 15000]  # basis: config change + client compatibility testing
+    effort_weeks_override: 4
   - id: WEB-NO-HSTS
     match: "web.hsts is null"
     severity: low
     csf: PR.DS
     title: "HSTS not set"
     cost_override_usd: [1000, 5000]  # basis: header + staged max-age
+    effort_weeks_override: 2
   - id: WEB-CERT-EXPIRING
     match: "web.cert_days_remaining < 14"
     severity: medium
@@ -195,6 +206,7 @@ rules:
     csf: ID.RA
     title: "Potential exposure to a CISA Known Exploited Vulnerability"
     cost_override_usd: [25000, 150000]  # basis: emergency patch/replace + compromise assessment
+    effort_weeks_override: 2
 
   # Public record
   - id: PUB-INCIDENT-RECENT
@@ -203,6 +215,7 @@ rules:
     csf: RS.MA
     title: "Publicly disclosed security incident in the last 24 months"
     cost_override_usd: [25000, 100000]  # basis: verify post-incident remediation, retrospective review
+    effort_weeks_override: 6
 
   # SOC 2 derived
   - id: SOC2-EXCEPTION-ACCESS
@@ -211,33 +224,39 @@ rules:
     csf: PR.AA
     title: "SOC 2 exception in logical access controls"
     cost_override_usd: [20000, 80000]  # basis: HRIS→IdP automation, conditional access cleanup
+    effort_weeks_override: 10
   - id: SOC2-EXCEPTION-MONITORING
     match: "soc2.exception.control_id in ['CC7.2', 'CC7.3']"
     severity: high
     csf: DE.CM
     title: "SOC 2 exception in security monitoring"
     cost_override_usd: [15000, 60000]  # basis: alert routing controls, MSSP SLA review
+    effort_weeks_override: 6
   - id: SOC2-EXCEPTION-CHANGE
     match: "soc2.exception.control_id == 'CC8.1'"
     severity: medium
     csf: PR.PS
     title: "SOC 2 exception in change management"
     cost_override_usd: [5000, 20000]  # basis: emergency change process, tooling
+    effort_weeks_override: 4
   - id: SOC2-EXCEPTION-VENDOR
     match: "soc2.exception.control_id in ['CC9.2']"
     severity: medium
     csf: GV.SC
     title: "SOC 2 exception in vendor risk management"
     cost_override_usd: [5000, 25000]  # basis: vendor review program
+    effort_weeks_override: 8
   - id: SOC2-BRIDGE-GAP
     match: "soc2.bridge_gap_days > 90"
     severity: medium
     csf: GV.OV
     title: "SOC 2 report period ended more than 90 days ago; no bridge letter provided"
     cost_override_usd: [2000, 10000]  # basis: bridge letter, audit scheduling
+    effort_weeks_override: 3
   - id: SOC2-CARVE-OUT-CRITICAL
     match: "soc2.subservice_org.method == carve_out and soc2.subservice_org.critical == true"
     severity: low
     csf: GV.SC
     title: "Critical subservice organization carved out of SOC 2 scope"
     cost_override_usd: [0, 5000]  # basis: obtain subservice org SOC report
+    effort_weeks_override: 2

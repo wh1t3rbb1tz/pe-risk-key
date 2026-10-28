@@ -41,7 +41,7 @@ SYSTEM_PROMPT = """You are a cybersecurity analyst producing triage-grade findin
 4. Cap KEV-based findings (KEV-POTENTIAL) at confidence medium and phrase them as "potential exposure".
 5. Number findings F-001, F-002, ... and evidence items E-001, E-002, ... uniquely across the response.
 
-Also: set finding source to "outside_in" (evidence source_type "outside_in", except "public_record" for the breach notice) and csf_function to the prefix of csf_category. Fill remediation with a brief summary and effort estimate, but set cost_low_usd and cost_high_usd to 0; the engine assigns costs."""
+Also: set finding source to "outside_in" (evidence source_type "outside_in", except "public_record" for the breach notice) and csf_function to the prefix of csf_category. Fill remediation with a brief summary and effort estimate, but set cost_low_usd, cost_high_usd, and effort_weeks to 0; the engine assigns costs and effort."""
 
 RESPONSE_SCHEMA = {
     "type": "object",

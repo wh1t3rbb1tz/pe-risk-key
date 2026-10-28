@@ -2,10 +2,11 @@
 
 The model proposes findings; this module clamps them to the matching
 rule's bounds so the same signals always produce the same floor:
-confidence, severity (within one level of baseline), CSF category, and
-remediation cost bands. Every change (and every unmatchable finding) is
-recorded as an adjustment dict ``{finding_id, field, from, to, reason}``
-for the dashboard trace panel. Inputs are never mutated.
+confidence, severity (within one level of baseline), CSF category,
+finding source, and remediation cost/effort. Every change (and every
+unmatchable finding) is recorded as an adjustment dict
+``{finding_id, field, from, to, reason}`` for the dashboard trace panel.
+Inputs are never mutated.
 """
 
 from __future__ import annotations
@@ -61,9 +62,11 @@ def apply_rule_constraints(
         _clamp_confidence(updated, finding_id, rule, adjustments)
         _clamp_severity(updated, finding_id, rule, adjustments)
         _apply_csf(updated, finding_id, rule, adjustments)
+        _apply_source(updated, finding_id, rule, adjustments)
         _apply_cost(
             updated, finding_id, rule, scoring_config, employee_band, adjustments
         )
+        _apply_effort(updated, finding_id, rule, adjustments)
         constrained.append(updated)
     return constrained, adjustments
 
@@ -227,3 +230,60 @@ def _apply_csf(
             }
         )
         finding["csf_function"] = function
+
+
+def _apply_source(
+    finding: dict[str, Any],
+    finding_id: Any,
+    rule: dict[str, Any],
+    adjustments: list[dict[str, Any]],
+) -> None:
+    evidence = finding.get("evidence")
+    types = (
+        {item.get("source_type") for item in evidence if isinstance(item, dict)}
+        if isinstance(evidence, list)
+        else set()
+    )
+    if "public_record" in types and not (types & {"document", "interview"}):
+        derived = "public_record"
+    elif isinstance(rule.get("id"), str) and rule["id"].startswith("SOC2-"):
+        derived = "document"
+    else:
+        return
+    if finding.get("source") != derived:
+        adjustments.append(
+            {
+                "finding_id": finding_id,
+                "field": "source",
+                "from": finding.get("source"),
+                "to": derived,
+                "reason": "source",
+            }
+        )
+        finding["source"] = derived
+
+
+def _apply_effort(
+    finding: dict[str, Any],
+    finding_id: Any,
+    rule: dict[str, Any],
+    adjustments: list[dict[str, Any]],
+) -> None:
+    remediation = finding.get("remediation")
+    if not isinstance(remediation, dict):
+        return
+    override = rule.get("effort_weeks_override")
+    if not isinstance(override, (int, float)):
+        return
+    if remediation.get("effort_weeks") == override:
+        return
+    adjustments.append(
+        {
+            "finding_id": finding_id,
+            "field": "remediation.effort_weeks",
+            "from": remediation.get("effort_weeks"),
+            "to": override,
+            "reason": "effort_override",
+        }
+    )
+    remediation["effort_weeks"] = override

@@ -10,16 +10,19 @@
   "collected_at": "2026-10-28T16:00:00Z",
   "check_email_auth": {
     "collection_method": "dns_query",
-    "spf": { "record": "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all", "qualifier": "~all", "lookup_count": 6 },
-    "dmarc": { "record": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example", "policy": "none", "pct": 100, "rua": true },
-    "dkim": { "selectors_found": ["selector1"], "selectors_checked": ["default", "selector1", "selector2", "google", "k1", "s1"] }
+    "spf": { "queried_name": "brightwaterfleet.example", "record_type": "TXT", "record": "v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all", "qualifier": "~all", "lookup_count": 2 },
+    "dmarc": { "queried_name": "_dmarc.brightwaterfleet.example", "record_type": "TXT", "record": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example", "policy": "none", "pct": 100, "rua": true },
+    "dkim": { "selectors_found": ["selector1"], "selectors_checked": ["default", "selector1", "selector2", "google", "k1", "s1"], "queried_names": { "default": "default._domainkey.brightwaterfleet.example", "selector1": "selector1._domainkey.brightwaterfleet.example", "selector2": "selector2._domainkey.brightwaterfleet.example", "google": "google._domainkey.brightwaterfleet.example", "k1": "k1._domainkey.brightwaterfleet.example", "s1": "s1._domainkey.brightwaterfleet.example" } }
   },
   "check_dnssec": {
     "collection_method": "dns_query",
+    "queried_name": "brightwaterfleet.example",
+    "record_type": "DS",
     "enabled": false
   },
   "enumerate_ct_subdomains": {
     "collection_method": "ct_log_query",
+    "query_url": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
     "unique_hostnames": 47,
     "risky_hostnames": [
       { "hostname": "vpn.brightwaterfleet.example", "pattern": "vpn", "first_seen": "2023-02-11", "last_seen": "2026-09-30" },
@@ -34,6 +37,7 @@
     "hosts": [
       {
         "host": "brightwaterfleet.example",
+        "url": "https://brightwaterfleet.example/",
         "tls_versions": ["TLSv1.2", "TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 63 },
         "headers": { "strict-transport-security": null, "content-security-policy": null, "x-frame-options": "SAMEORIGIN" },
@@ -41,6 +45,7 @@
       },
       {
         "host": "www.brightwaterfleet.example",
+        "url": "https://www.brightwaterfleet.example/",
         "tls_versions": ["TLSv1.0", "TLSv1.1", "TLSv1.2"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 63 },
         "headers": { "strict-transport-security": null, "content-security-policy": null, "x-frame-options": null },
@@ -53,12 +58,14 @@
   },
   "match_known_exploited": {
     "collection_method": "offline_lookup",
+    "snapshot_source": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     "kev_snapshot_date": "2026-10-20",
     "matches": [
       {
         "product": "ExampleGate SSL-VPN",
         "version": "7.0.11",
         "cve_id": "CVE-PLACEHOLDER-0001",
+        "matched_fingerprint": { "host": "www.brightwaterfleet.example", "product": "ExampleGate SSL-VPN", "version": "7.0.11", "source": "login page link and asset path referenced from www footer" },
         "_note": "Fictional product. During build, keep the KEV matcher real; this fixture entry exercises the KEV-POTENTIAL rule.",
         "basis": "version string from public page; not verified on host"
       }

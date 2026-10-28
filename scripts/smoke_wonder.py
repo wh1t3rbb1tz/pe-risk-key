@@ -37,7 +37,7 @@ SYSTEM_PROMPT = """You are a cybersecurity analyst producing triage-grade findin
 
 1. Map collector signals to findings using the rules in scoring.yaml. For each finding, set rule_id, baseline severity, csf_category, and title from the matching rule.
 2. You may adjust severity by at most one level from the baseline, and only with a justification in deal_impact.
-3. Cite evidence using only data in the fixture. Every evidence item must have a specific locator (DNS record, hostname, header name, URL, or version string) and the collection_method recorded in the fixture for that collector. Never invent evidence.
+3. Cite evidence using only data in the fixture. Every evidence item must have a specific locator (DNS record, hostname, header name, URL, or version string) and the collection_method recorded in the fixture for that collector. Never invent evidence. Copy evidence locators exactly from the collector output fields (queried_name + record_type, URL, hostname); never construct or shorten them.
 4. Cap KEV-based findings (KEV-POTENTIAL) at confidence medium and phrase them as "potential exposure".
 5. Number findings F-001, F-002, ... and evidence items E-001, E-002, ... uniquely across the response.
 

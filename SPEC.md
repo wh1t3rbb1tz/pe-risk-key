@@ -107,7 +107,7 @@ In confidential mode, uploaded documents and transcripts are processed only by t
 
 ### 4.1 Passive collectors (`collectors/`)
 
-Each collector is a pure function `collect(domain) -> list[Signal]`, has a `collection_method` constant, and has a fixture-backed test. Agent-facing tool definitions are generated from these.
+Each collector is a pure function `collect(domain) -> dict` returning exactly its section of `fixtures/outside_in/<domain>.json`, including `collection_method`. Every signal carries an exact locator (`queried_name` + `record_type`, query URL, hostname) so downstream evidence can cite it verbatim. Each collector has a fixture-backed test. Agent-facing tool definitions are generated from these.
 
 | Tool name | Signals | Collection method |
 |---|---|---|

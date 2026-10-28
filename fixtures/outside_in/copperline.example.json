@@ -10,13 +10,14 @@
   "collected_at": "2026-10-28T16:05:00Z",
   "check_email_auth": {
     "collection_method": "dns_query",
-    "spf": { "record": "v=spf1 include:_spf.mailhost.example -all", "qualifier": "-all", "lookup_count": 3 },
-    "dmarc": { "record": "v=DMARC1; p=reject; rua=mailto:dmarc@copperline.example", "policy": "reject", "pct": 100, "rua": true },
-    "dkim": { "selectors_found": ["google", "s1"], "selectors_checked": ["default", "selector1", "selector2", "google", "k1", "s1"] }
+    "spf": { "queried_name": "copperline.example", "record_type": "TXT", "record": "v=spf1 include:_spf.mailhost.example -all", "qualifier": "-all", "lookup_count": 1 },
+    "dmarc": { "queried_name": "_dmarc.copperline.example", "record_type": "TXT", "record": "v=DMARC1; p=reject; rua=mailto:dmarc@copperline.example", "policy": "reject", "pct": 100, "rua": true },
+    "dkim": { "selectors_found": ["google", "s1"], "selectors_checked": ["default", "selector1", "selector2", "google", "k1", "s1"], "queried_names": { "default": "default._domainkey.copperline.example", "selector1": "selector1._domainkey.copperline.example", "selector2": "selector2._domainkey.copperline.example", "google": "google._domainkey.copperline.example", "k1": "k1._domainkey.copperline.example", "s1": "s1._domainkey.copperline.example" } }
   },
-  "check_dnssec": { "collection_method": "dns_query", "enabled": true },
+  "check_dnssec": { "collection_method": "dns_query", "queried_name": "copperline.example", "record_type": "DS", "enabled": true },
   "enumerate_ct_subdomains": {
     "collection_method": "ct_log_query",
+    "query_url": "https://crt.sh/?q=%25.copperline.example&output=json",
     "unique_hostnames": 12,
     "risky_hostnames": [
       { "hostname": "staging.copperline.example", "pattern": "staging", "first_seen": "2025-03-02", "last_seen": "2026-09-15" }
@@ -28,6 +29,7 @@
     "hosts": [
       {
         "host": "copperline.example",
+        "url": "https://copperline.example/",
         "tls_versions": ["TLSv1.2", "TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
         "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
@@ -35,6 +37,7 @@
       },
       {
         "host": "www.copperline.example",
+        "url": "https://www.copperline.example/",
         "tls_versions": ["TLSv1.2", "TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 71 },
         "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY" },
@@ -42,6 +45,6 @@
       }
     ]
   },
-  "match_known_exploited": { "collection_method": "offline_lookup", "kev_snapshot_date": "2026-10-20", "matches": [], "matches_count": 0 },
+  "match_known_exploited": { "collection_method": "offline_lookup", "snapshot_source": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json", "kev_snapshot_date": "2026-10-20", "matches": [], "matches_count": 0 },
   "search_public_incidents": { "collection_method": "search_grounding", "results": [], "disclosed_within_months": null }
 }

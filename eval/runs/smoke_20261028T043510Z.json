@@ -1,0 +1,41 @@
+{
+  "created_at": "20261028T043510Z",
+  "model": "muse-wonder-1.0",
+  "usage": {
+    "prompt_tokens": 2344,
+    "completion_tokens": 4031,
+    "cached_tokens": 0
+  },
+  "response": {
+    "findings": [
+      {
+        "confidence": "high",
+        "csf_category": "PR.DS",
+        "csf_function": "PR",
+        "deal_impact": "Spoofed-domain BEC and wire-fraud risk in deal and customer communications; severity retained at baseline high based on direct DNS observation.",
+        "evidence": [
+          {
+            "collected_at": null,
+            "collection_method": "dns_query",
+            "collector": "check_email_auth",
+            "evidence_id": "E-001",
+            "excerpt": "v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example",
+            "locator": "brightwaterfleet.example",
+            "source_type": "outside_in"
+          }
+        ],
+        "finding_id": "F-001",
+        "remediation": {
+          "cost_high_usd": 15000,
+          "cost_low_usd": 5000,
+          "effort_weeks": 2,
+          "summary": "Validate aligned SPF/DKIM, then move to p=quarantine and p=reject."
+        },
+        "rule_id": "EMAIL-DMARC-NONE",
+        "severity": "high",
+        "source": "outside_in",
+        "title": "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud"
+      }
+    ]
+  }
+}

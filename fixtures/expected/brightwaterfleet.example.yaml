@@ -33,6 +33,7 @@ must_not_find:
   - SOC2-EXCEPTION-VENDOR      # CC9.2 had no exceptions
   - WEB-CERT-EXPIRING          # 63 days remaining
   - EMAIL-DMARC-MISSING        # record exists
+  - KEV-PRODUCT-LISTED         # Brightwater's KEV match is an appliance (KEV-POTENTIAL fires instead)
 
 expected_soc2:
   opinion: unqualified          # "except for deviations" language did not modify the opinion

@@ -5,7 +5,32 @@
     {
       "cveID": "CVE-PLACEHOLDER-0001",
       "vendorProject": "ExampleGate",
-      "product": "SSL-VPN"
+      "product": "ExampleGate SSL-VPN"
+    },
+    {
+      "cveID": "CVE-2024-11111",
+      "vendorProject": "WordPress",
+      "product": "Core"
+    },
+    {
+      "cveID": "CVE-2024-22222",
+      "vendorProject": "WordPress",
+      "product": "File Manager Plugin"
+    },
+    {
+      "cveID": "CVE-2024-33333",
+      "vendorProject": "WordPress",
+      "product": "Snap Creek Duplicator Plugin"
+    },
+    {
+      "cveID": "CVE-2024-44444",
+      "vendorProject": "WordPress",
+      "product": "Social Warfare Plugin"
+    },
+    {
+      "cveID": "CVE-2024-55555",
+      "vendorProject": "cPanel",
+      "product": "WP2"
     },
     {
       "cveID": "CVE-2024-99999",

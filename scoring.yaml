@@ -179,7 +179,7 @@ rules:
 
   # Web posture
   - id: WEB-LEGACY-TLS
-    match: "web.tls_versions contains 'TLSv1.0' or web.tls_versions contains 'TLSv1.1'"
+    match: "web.tls_support['TLSv1.0'] == true or web.tls_support['TLSv1.1'] == true"
     severity: medium
     csf: PR.DS
     title: "Deprecated TLS versions offered"
@@ -200,13 +200,21 @@ rules:
 
   # Known exploited
   - id: KEV-POTENTIAL
-    match: "kev.matches_count >= 1"
+    match: "any kev.matches where match_tier == appliance_exposed"
     severity: critical
     max_confidence: medium   # fingerprint-based; never high
     csf: ID.RA
-    title: "Potential exposure to a CISA Known Exploited Vulnerability"
+    title: "Internet-facing appliance listed in CISA KEV (version not verified)"
     cost_override_usd: [25000, 150000]  # basis: emergency patch/replace + compromise assessment
     effort_weeks_override: 2
+  - id: KEV-PRODUCT-LISTED
+    match: "kev.matches_count >= 1 and no kev.matches where match_tier == appliance_exposed"
+    severity: low
+    max_confidence: low
+    csf: ID.RA
+    title: "Detected software has entries in CISA KEV; verify patch level"
+    cost_override_usd: [1000, 5000]  # basis: verify patch level of listed software
+    effort_weeks_override: 1
 
   # Public record
   - id: PUB-INCIDENT-RECENT

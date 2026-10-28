@@ -21,6 +21,17 @@ KEV_SNAPSHOT_PATH = ROOT / "data" / "kev_snapshot.json"
 
 VERSION_NOTE = "KEV lists products, not affected versions; version not verified."
 
+# Explicit (kind, normalized product) -> (vendorProject, product) mapping.
+# No substring matching: anything outside this table must equal a catalog
+# vendor+product pair exactly (normalized) to match.
+KEV_ALIASES = {
+    ("cms", "wordpress"): ("WordPress", "Core"),
+    ("plugin", "wp-file-manager"): ("WordPress", "File Manager Plugin"),
+    ("plugin", "duplicator"): ("WordPress", "Snap Creek Duplicator Plugin"),
+    ("plugin", "social-warfare"): ("WordPress", "Social Warfare Plugin"),
+    ("appliance", "examplegate ssl-vpn"): ("ExampleGate", "ExampleGate SSL-VPN"),
+}
+
 
 def _load_snapshot() -> dict:
     try:
@@ -32,37 +43,66 @@ def _load_snapshot() -> dict:
         ) from None
 
 
-def _matches(product: str, vendor: str, catalog_product: str) -> bool:
-    candidate = product.strip().lower()
-    combined = f"{vendor} {catalog_product}".strip().lower()
-    return bool(candidate) and (candidate in combined or combined in candidate)
+def _normalize(text: Any) -> str:
+    return " ".join(str(text or "").split()).lower()
+
+
+def _catalog_index(vulnerabilities: list) -> tuple[dict, dict]:
+    by_pair: dict[tuple[str, str], list] = {}
+    by_combined: dict[str, list] = {}
+    for vuln in vulnerabilities:
+        if not isinstance(vuln, dict):
+            continue
+        vendor = _normalize(vuln.get("vendorProject"))
+        product = _normalize(vuln.get("product"))
+        by_pair.setdefault((vendor, product), []).append(vuln)
+        by_combined.setdefault(f"{vendor} {product}".strip(), []).append(vuln)
+    return by_pair, by_combined
 
 
 def _match_fingerprints(
     fingerprints: list[dict], vulnerabilities: list[dict], snapshot_date: Any
 ) -> list[dict]:
+    by_pair, by_combined = _catalog_index(vulnerabilities)
     matches = []
+    seen = set()
     for fingerprint in fingerprints:
         if not isinstance(fingerprint, dict):
             continue
-        product = fingerprint.get("product") or ""
-        for vuln in vulnerabilities:
-            if not isinstance(vuln, dict):
+        if fingerprint.get("kind") == "cdn_or_proxy":
+            continue
+        name = _normalize(fingerprint.get("product"))
+        if not name:
+            continue
+        alias = KEV_ALIASES.get((fingerprint.get("kind"), name))
+        if alias is not None:
+            candidates = by_pair.get(
+                (_normalize(alias[0]), _normalize(alias[1])), []
+            )
+        else:
+            candidates = by_combined.get(name, [])
+        for vuln in candidates:
+            key = (vuln.get("cveID"), fingerprint.get("host"))
+            if key in seen:
                 continue
-            vendor = vuln.get("vendorProject") or ""
-            catalog_product = vuln.get("product") or ""
-            if _matches(product, vendor, catalog_product):
-                matches.append(
-                    {
-                        "cve_id": vuln.get("cveID"),
-                        "vendor": vendor,
-                        "product": catalog_product,
-                        "matched_fingerprint": fingerprint,
-                        "kev_snapshot_date": snapshot_date,
-                        "match_level": "product",
-                        "note": VERSION_NOTE,
-                    }
-                )
+            seen.add(key)
+            tier = (
+                "appliance_exposed"
+                if fingerprint.get("kind") == "appliance"
+                else "product_listed"
+            )
+            matches.append(
+                {
+                    "cve_id": vuln.get("cveID"),
+                    "vendor": vuln.get("vendorProject"),
+                    "product": vuln.get("product"),
+                    "matched_fingerprint": fingerprint,
+                    "kev_snapshot_date": snapshot_date,
+                    "match_level": "product",
+                    "match_tier": tier,
+                    "note": VERSION_NOTE,
+                }
+            )
     return matches
 
 

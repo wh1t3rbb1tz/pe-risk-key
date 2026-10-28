@@ -455,6 +455,21 @@ def test_surface_rules_cap_confidence_at_medium():
     assert by_id["SURFACE-SPRAWL"]["max_confidence"] == "medium"
 
 
+def test_kev_rules_split_by_match_tier():
+    scoring, _ = _repo_files()
+    by_id = {rule["id"]: rule for rule in scoring["rules"]}
+    potential = by_id["KEV-POTENTIAL"]
+    assert "appliance_exposed" in potential["match"]
+    assert potential["severity"] == "critical"
+    assert potential["max_confidence"] == "medium"
+    listed = by_id["KEV-PRODUCT-LISTED"]
+    assert listed["severity"] == "low"
+    assert listed["max_confidence"] == "low"
+    assert listed["csf"] == "ID.RA"
+    assert listed["cost_override_usd"] == [1000, 5000]
+    assert listed["effort_weeks_override"] == 1
+
+
 def test_inputs_not_mutated():
     findings = [
         _finding(rule_id="KEV-POTENTIAL", confidence="high", severity="info")

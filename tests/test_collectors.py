@@ -567,10 +567,14 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
             "days_remaining": 800,
         },
     )
+    probes = {
+        (f"www.{DOMAIN}", "TLSv1.0"): True,
+        (DOMAIN, "TLSv1.1"): "unknown",
+    }
     monkeypatch.setattr(
         web_posture,
         "tls_accepts",
-        lambda host, version: host == f"www.{DOMAIN}" and version == "TLSv1.0",
+        lambda host, version: probes.get((host, version), False),
     )
     net.begin_run(DOMAIN)
     out = web_posture.collect(DOMAIN)
@@ -585,24 +589,39 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
         {
             "product": "nginx",
             "version": None,
-            "source": "server header",
-            "locator": f"https://{DOMAIN}/ (server header)",
+            "kind": "web_server",
+            "source": "server_header",
+            "locators": [f"https://{DOMAIN}/ (server header)"],
         }
     ]
+    assert apex["tls_support"] == {
+        "TLSv1.0": False,
+        "TLSv1.1": "not_tested",
+        "TLSv1.2": "not_tested",
+        "TLSv1.3": True,
+    }
     assert apex["tls_versions"] == ["TLSv1.3"]
+    assert www["tls_support"] == {
+        "TLSv1.0": True,
+        "TLSv1.1": False,
+        "TLSv1.2": "not_tested",
+        "TLSv1.3": True,
+    }
     assert www["tls_versions"] == ["TLSv1.0", "TLSv1.3"]
     assert www["fingerprints"] == [
         {
             "product": "WordPress",
             "version": "6.2",
-            "source": "meta generator tag",
-            "locator": f"https://www.{DOMAIN}/ (meta generator tag)",
+            "kind": "cms",
+            "source": "meta_generator",
+            "locators": [f"https://www.{DOMAIN}/ (meta generator tag)"],
         },
         {
             "product": "ExampleGate SSL-VPN",
             "version": None,
-            "source": "link /examplegate/login",
-            "locator": f"https://www.{DOMAIN}/ (link /examplegate/login)",
+            "kind": "appliance",
+            "source": "asset_path",
+            "locators": [f"https://www.{DOMAIN}/ (link /examplegate/login)"],
         },
     ]
     assert www["cert"]["issuer"] == "Example Public CA"
@@ -612,14 +631,71 @@ def test_web_posture_fingerprints_and_tls(monkeypatch):
     assert set(apex["fingerprints"][0]) == set(fixture_host["fingerprints"][0])
 
 
+WP_PLUGIN_HTML = """<html><head>
+<meta name="generator" content="WordPress 6.2">
+</head><body>
+<a href="/wp-login.php">login</a>
+<script src="/wp-content/plugins/duplicator/admin.js?ver=1.5.2"></script>
+<link href="/wp-content/plugins/duplicator/style.css" rel="stylesheet">
+<a href="/wp-content/plugins/social-warfare/x.js">x</a>
+</body></html>"""
+
+
+def test_web_posture_merges_products_and_detects_plugins(monkeypatch):
+    pages = {
+        f"https://{DOMAIN}/": (200, {}, WP_PLUGIN_HTML),
+        f"https://www.{DOMAIN}/": (200, {}, APEX_HTML),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    (apex, _) = web_posture.collect(DOMAIN)["hosts"]
+    base = f"https://{DOMAIN}"
+    assert apex["fingerprints"] == [
+        {
+            "product": "WordPress",
+            "version": "6.2",
+            "kind": "cms",
+            "source": "meta_generator",
+            "locators": [
+                f"{base}/ (meta generator tag)",
+                f"{base}/ (link /wp-login.php)",
+                f"{base}/ (link /wp-content/plugins/duplicator/admin.js?ver=1.5.2)",
+                f"{base}/ (link /wp-content/plugins/duplicator/style.css)",
+                f"{base}/ (link /wp-content/plugins/social-warfare/x.js)",
+            ],
+        },
+        {
+            "product": "duplicator",
+            "version": "1.5.2",
+            "kind": "plugin",
+            "source": "asset_path",
+            "locators": [
+                f"{base}/ (link /wp-content/plugins/duplicator/admin.js?ver=1.5.2)",
+                f"{base}/ (link /wp-content/plugins/duplicator/style.css)",
+            ],
+        },
+        {
+            "product": "social-warfare",
+            "version": None,
+            "kind": "plugin",
+            "source": "asset_path",
+            "locators": [
+                f"{base}/ (link /wp-content/plugins/social-warfare/x.js)"
+            ],
+        },
+    ]
+
+
 def test_kev_product_match_and_note(monkeypatch):
     monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
     matched_fp = {
         "host": f"www.{DOMAIN}",
         "product": "examplegate ssl-vpn",
         "version": "7.0.11",
-        "source": "link /examplegate/login",
-        "locator": f"https://www.{DOMAIN}/ (link /examplegate/login)",
+        "kind": "appliance",
+        "source": "asset_path",
+        "locators": [f"https://www.{DOMAIN}/ (link /examplegate/login)"],
     }
     fps = [
         matched_fp,
@@ -627,8 +703,9 @@ def test_kev_product_match_and_note(monkeypatch):
             "host": DOMAIN,
             "product": "nginx",
             "version": None,
-            "source": "server header",
-            "locator": f"https://{DOMAIN}/ (server header)",
+            "kind": "web_server",
+            "source": "server_header",
+            "locators": [f"https://{DOMAIN}/ (server header)"],
         },
     ]
     out = kev.collect(DOMAIN, fingerprints=fps)
@@ -637,15 +714,107 @@ def test_kev_product_match_and_note(monkeypatch):
     (match,) = out["matches"]
     assert match["cve_id"] == "CVE-PLACEHOLDER-0001"
     assert match["vendor"] == "ExampleGate"
-    assert match["product"] == "SSL-VPN"
+    assert match["product"] == "ExampleGate SSL-VPN"
     assert match["matched_fingerprint"] == matched_fp
     assert match["kev_snapshot_date"] == "2026-10-20"
     assert match["match_level"] == "product"
+    assert match["match_tier"] == "appliance_exposed"
     assert (
         match["note"]
         == "KEV lists products, not affected versions; version not verified."
     )
     assert "version" not in match
+
+
+def test_kev_cdn_fingerprints_match_nothing(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    out = kev.collect(
+        DOMAIN,
+        fingerprints=[
+            {
+                "host": DOMAIN,
+                "product": "Cloudflare",
+                "version": None,
+                "kind": "cdn_or_proxy",
+                "source": "server_header",
+                "locators": [f"https://{DOMAIN}/ (server header)"],
+            }
+        ],
+    )
+    assert out["matches"] == []
+    assert out["matches_count"] == 0
+
+
+def test_kev_cms_matches_only_core(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    out = kev.collect(
+        DOMAIN,
+        fingerprints=[
+            {
+                "host": f"www.{DOMAIN}",
+                "product": "WordPress",
+                "version": "6.2",
+                "kind": "cms",
+                "source": "meta_generator",
+                "locators": ["u"],
+            }
+        ],
+    )
+    assert [m["cve_id"] for m in out["matches"]] == ["CVE-2024-11111"]
+    assert out["matches"][0]["match_tier"] == "product_listed"
+
+
+def test_kev_plugin_slug_matches_its_entry(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    out = kev.collect(
+        DOMAIN,
+        fingerprints=[
+            {
+                "host": f"www.{DOMAIN}",
+                "product": "duplicator",
+                "version": "1.5.2",
+                "kind": "plugin",
+                "source": "asset_path",
+                "locators": ["u"],
+            }
+        ],
+    )
+    (match,) = out["matches"]
+    assert match["cve_id"] == "CVE-2024-33333"
+    assert match["product"] == "Snap Creek Duplicator Plugin"
+    assert match["match_tier"] == "product_listed"
+
+
+def test_kev_dedupes_by_cve_and_host(monkeypatch):
+    monkeypatch.setattr(kev, "KEV_SNAPSHOT_PATH", KEV_MINI)
+    out = kev.collect(
+        DOMAIN,
+        fingerprints=[
+            {
+                "host": f"www.{DOMAIN}",
+                "product": "duplicator",
+                "kind": "plugin",
+                "locators": ["u1"],
+            },
+            {
+                "host": f"www.{DOMAIN}",
+                "product": "Duplicator",
+                "kind": "plugin",
+                "locators": ["u2"],
+            },
+            {
+                "host": DOMAIN,
+                "product": "duplicator",
+                "kind": "plugin",
+                "locators": ["u3"],
+            },
+        ],
+    )
+    assert out["matches_count"] == 2
+    assert {(m["cve_id"], m["matched_fingerprint"]["host"]) for m in out["matches"]} == {
+        ("CVE-2024-33333", f"www.{DOMAIN}"),
+        ("CVE-2024-33333", DOMAIN),
+    }
 
 
 def test_kev_self_collects_posture(monkeypatch):
@@ -658,8 +827,9 @@ def test_kev_self_collects_posture(monkeypatch):
                     {
                         "product": "ExampleGate SSL-VPN",
                         "version": None,
-                        "source": "link /x",
-                        "locator": "u",
+                        "kind": "appliance",
+                        "source": "asset_path",
+                        "locators": ["u"],
                     }
                 ],
             }
@@ -685,7 +855,9 @@ def test_run_chains_fingerprints_into_kev(monkeypatch):
     out = run(
         "match_known_exploited",
         DOMAIN,
-        fingerprints=[{"product": "ExampleGate SSL-VPN", "locator": "u"}],
+        fingerprints=[
+            {"product": "ExampleGate SSL-VPN", "kind": "appliance", "locators": ["u"]}
+        ],
     )
     assert out["matches_count"] == 1
 

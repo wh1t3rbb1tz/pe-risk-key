@@ -36,10 +36,11 @@
         "status": "ok",
         "status_code": 200,
         "redirect_location": null,
-        "tls_versions": ["TLSv1.2", "TLSv1.3"],
+        "tls_support": { "TLSv1.0": false, "TLSv1.1": false, "TLSv1.2": "not_tested", "TLSv1.3": true },
+        "tls_versions": ["TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 71, "not_after": "2027-01-07T00:00:00+00:00" },
-        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": null, "x-powered-by": null },
-        "fingerprints": [ { "product": "cloud CDN", "version": null, "source": "via header", "locator": "https://copperline.example/ (via header)" } ]
+        "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": "Cloudflare", "x-powered-by": null },
+        "fingerprints": [ { "product": "Cloudflare", "version": null, "kind": "cdn_or_proxy", "source": "server_header", "locators": ["https://copperline.example/ (server header)"] } ]
       },
       {
         "host": "www.copperline.example",
@@ -47,7 +48,8 @@
         "status": "ok",
         "status_code": 200,
         "redirect_location": null,
-        "tls_versions": ["TLSv1.2", "TLSv1.3"],
+        "tls_support": { "TLSv1.0": false, "TLSv1.1": false, "TLSv1.2": "not_tested", "TLSv1.3": true },
+        "tls_versions": ["TLSv1.3"],
         "cert": { "issuer": "Example Public CA", "days_remaining": 71, "not_after": "2027-01-07T00:00:00+00:00" },
         "headers": { "strict-transport-security": "max-age=31536000; includeSubDomains", "content-security-policy": "default-src 'self'", "x-frame-options": "DENY", "server": null, "x-powered-by": null },
         "fingerprints": []

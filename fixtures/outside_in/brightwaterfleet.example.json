@@ -90,12 +90,24 @@
   "search_public_incidents": {
     "collection_method": "search_grounding",
     "status": "ok",
+    "queries_run": [
+      "Brightwater Fleet Systems, Inc. data breach",
+      "Brightwater Fleet Systems, Inc. security incident notification",
+      "Brightwater Fleet Systems, Inc. 8-K Item 1.05 cybersecurity incident",
+      "brightwaterfleet.example breach notice attorney general"
+    ],
+    "dropped_uncited": 0,
+    "dropped_prohibited_source": 0,
     "results": [
       {
         "type": "state_ag_breach_notice",
         "date": "2025-08-14",
         "summary": "Notice filed for unauthorized access to a customer support system; approx. 3,100 individuals notified.",
-        "url": "https://ag.state.example/breach-notices/2025-0814-brightwater"
+        "url": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+        "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+        "entity_match": "exact",
+        "match_basis": "Notice names Brightwater Fleet Systems, Inc. and its brightwaterfleet.example support portal.",
+        "counts_toward_findings": true
       }
     ],
     "disclosed_within_months": 14

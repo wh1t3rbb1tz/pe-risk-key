@@ -49,9 +49,17 @@ _REGISTRY: dict[str, dict[str, Any]] = {}
 
 
 def register(
-    *, tool_name: str, description: str, collection_method: str
-) -> Callable[[Callable[[str], dict]], Callable[[str], dict]]:
-    """Register a ``collect(domain) -> dict`` collector function."""
+    *,
+    tool_name: str,
+    description: str,
+    collection_method: str,
+    input_schema: dict[str, Any] | None = None,
+) -> Callable[[Callable[..., dict]], Callable[..., dict]]:
+    """Register a ``collect(domain, **kwargs) -> dict`` collector function.
+
+    ``input_schema`` overrides the default ``{"domain": ...}`` parameters
+    for tools that take extra orchestrator inputs (e.g. ``company_name``).
+    """
     if collection_method not in ALLOWED_METHODS:
         raise ValueError(
             f"collection_method {collection_method!r} is not one of "
@@ -59,14 +67,15 @@ def register(
         )
 
     def decorator(
-        func: Callable[[str], dict],
-    ) -> Callable[[str], dict]:
+        func: Callable[..., dict],
+    ) -> Callable[..., dict]:
         if tool_name in _REGISTRY:
             raise ValueError(f"Duplicate tool name: {tool_name!r}.")
         _REGISTRY[tool_name] = {
             "collect": func,
             "description": description,
             "collection_method": collection_method,
+            "input_schema": input_schema,
         }
         return func
 
@@ -81,7 +90,9 @@ def tool_definitions() -> list[dict[str, Any]]:
             "function": {
                 "name": name,
                 "description": entry["description"],
-                "parameters": copy.deepcopy(INPUT_SCHEMA),
+                "parameters": copy.deepcopy(
+                    entry["input_schema"] or INPUT_SCHEMA
+                ),
             },
         }
         for name, entry in _REGISTRY.items()

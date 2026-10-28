@@ -47,6 +47,10 @@ APPLIANCE_TOKENS = ("vpn", "firewall", "gateway")
 CMS_PRODUCTS = ("wordpress", "joomla", "drupal")
 
 
+def _slugify(product: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", product.strip().lower()).strip("-")
+
+
 class _PageLinks(HTMLParser):
     """Collects generator meta content plus link/script href targets."""
 
@@ -140,7 +144,19 @@ def _raw_fingerprints(url: str, headers: dict, body: str) -> list[dict]:
     page.feed(body)
     for content in page.generators:
         product, version = _split_product_version(content)
-        add(product, version, "meta_generator", "meta generator tag")
+        if product.strip().lower() in CMS_PRODUCTS:
+            # Only a CMS's own generator tag is kind cms.
+            add(product, version, "meta_generator", "meta generator tag")
+        else:
+            # A plugin's generator tag (e.g. WooCommerce) merges with the
+            # matching asset-path plugin fingerprint by slug.
+            add(
+                _slugify(product),
+                version,
+                "meta_generator",
+                "meta generator tag",
+                kind="plugin",
+            )
     for href in page.hrefs:
         lowered = href.lower()
         plugin = PLUGIN_PATH_RE.search(href)

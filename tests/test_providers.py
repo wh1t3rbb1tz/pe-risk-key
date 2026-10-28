@@ -50,9 +50,10 @@ def test_role_model_routing():
         "claim_extraction": "muse-wonder-1.0",
         "crosscheck": "muse-wonder-1.0",
         "narrative": "muse-wonder-1.0",
+        "public_records": "muse-spark-1.3",
     }
     assert SPARK_MODEL == "muse-spark-1.3"
-    assert SPARK_MODEL not in ROLE_MODELS.values()
+    assert ROLE_MODELS["public_records"] == SPARK_MODEL
     for role, model in ROLE_MODELS.items():
         client = ModelClient(role=role, mode="standard", api_key="test-key")  # type: ignore[arg-type]
         assert client.model == model
@@ -493,3 +494,27 @@ def test_timeout_config_default_env_and_override(monkeypatch):
     monkeypatch.setenv("MODEL_TIMEOUT_SECONDS", "45")
     assert _client()._timeout == 45.0
     assert _client(timeout=10.0)._timeout == 10.0
+
+
+def test_responses_search_sends_web_search_tool(monkeypatch):
+    client = ModelClient(role="public_records", mode="standard", api_key="k")
+    assert client.model == SPARK_MODEL
+    assert "-contributor" not in client.model
+    captured: dict = {}
+
+    def fake_create(*, input, **kwargs):
+        captured["input"] = input
+        captured.update(kwargs)
+        return SimpleNamespace(
+            output=[],
+            usage=SimpleNamespace(input_tokens=30, output_tokens=7),
+        )
+
+    monkeypatch.setattr(client.client.responses, "create", fake_create)
+    client.responses_search("Acme data breach", instructions="rules")
+    assert captured["input"] == "Acme data breach"
+    assert captured["model"] == "muse-spark-1.3"
+    assert captured["tools"] == [{"type": "web_search"}]
+    assert captured["instructions"] == "rules"
+    assert client.total_usage["prompt_tokens"] == 30
+    assert client.total_usage["completion_tokens"] == 7

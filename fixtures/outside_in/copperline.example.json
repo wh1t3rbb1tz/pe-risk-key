@@ -57,5 +57,18 @@
     ]
   },
   "match_known_exploited": { "collection_method": "offline_lookup", "status": "ok", "snapshot_source": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json", "kev_snapshot_date": "2026-10-20", "matches": [], "matches_count": 0 },
-  "search_public_incidents": { "collection_method": "search_grounding", "status": "ok", "results": [], "disclosed_within_months": null }
+  "search_public_incidents": {
+    "collection_method": "search_grounding",
+    "status": "ok",
+    "queries_run": [
+      "Copperline Analytics, LLC data breach",
+      "Copperline Analytics, LLC security incident notification",
+      "Copperline Analytics, LLC 8-K Item 1.05 cybersecurity incident",
+      "copperline.example breach notice attorney general"
+    ],
+    "dropped_uncited": 0,
+    "dropped_prohibited_source": 0,
+    "results": [],
+    "disclosed_within_months": null
+  }
 }

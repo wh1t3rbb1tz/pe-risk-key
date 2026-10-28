@@ -3,7 +3,7 @@
 import ast
 import json
 import ssl
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,15 @@ from pe_risk_key.collectors import (
     run,
     tool_definitions,
 )
-from pe_risk_key.collectors import ct, dnssec, email_auth, kev, net, web_posture
+from pe_risk_key.collectors import (
+    ct,
+    dnssec,
+    email_auth,
+    incidents,
+    kev,
+    net,
+    web_posture,
+)
 from pe_risk_key.collectors.registry import register
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "outside_in"
@@ -181,6 +189,10 @@ def test_demo_mode_returns_fixture_sections(monkeypatch):
     assert run("enumerate_ct_subdomains", DOMAIN) == fixture["enumerate_ct_subdomains"]
     assert run("check_web_posture", DOMAIN) == fixture["check_web_posture"]
     assert run("match_known_exploited", DOMAIN) == fixture["match_known_exploited"]
+    assert (
+        run("search_public_incidents", DOMAIN)
+        == fixture["search_public_incidents"]
+    )
     copper = json.loads(
         (FIXTURES_DIR / "copperline.example.json").read_text(encoding="utf-8")
     )
@@ -209,12 +221,16 @@ def test_tool_definitions_shape():
         "enumerate_ct_subdomains",
         "check_web_posture",
         "match_known_exploited",
+        "search_public_incidents",
     }
     for definition in defs:
         assert definition["type"] == "function"
         params = definition["function"]["parameters"]
         assert params["required"] == ["domain"]
-        assert set(params["properties"]) == {"domain"}
+        if definition["function"]["name"] == "search_public_incidents":
+            assert set(params["properties"]) == {"domain", "company_name"}
+        else:
+            assert set(params["properties"]) == {"domain"}
 
 
 def test_allowed_methods_match_schema():
@@ -826,6 +842,32 @@ def test_kev_dedupes_by_cve_and_host(monkeypatch):
     }
 
 
+def test_plugin_generator_tag_merges_with_asset_fingerprint(monkeypatch):
+    html = """<html><head>
+<meta name="generator" content="WordPress 6.4.2">
+<meta name="generator" content="WooCommerce 9.1.0">
+</head><body>
+<link href="/wp-content/plugins/woocommerce/assets/style.css?ver=9.0.0">
+</body></html>"""
+    pages = {
+        f"https://{DOMAIN}/": (200, {}, html),
+        f"https://www.{DOMAIN}/": (200, {}, APEX_HTML),
+    }
+    monkeypatch.setattr(net, "httpx", _FakeWebPages(pages))
+    _mock_tls(monkeypatch)
+    net.begin_run(DOMAIN)
+    (apex, _) = web_posture.collect(DOMAIN)["hosts"]
+    by_product = {fp["product"]: fp for fp in apex["fingerprints"]}
+    assert set(by_product) == {"WordPress", "woocommerce"}
+    assert by_product["WordPress"]["kind"] == "cms"
+    woo = by_product["woocommerce"]
+    assert woo["kind"] == "plugin"
+    assert woo["version"] == "9.1.0"  # generator tag wins over asset ver
+    assert woo["locator_count"] == 2
+    assert any("meta generator tag" in loc for loc in woo["locators"])
+    assert any("plugins/woocommerce" in loc for loc in woo["locators"])
+
+
 def test_wordpress_page_fixture(monkeypatch):
     html = (Path(__file__).resolve().parent / "data" / "wordpress_page.html").read_text(
         encoding="utf-8"
@@ -1081,3 +1123,294 @@ def test_fixture_sections_have_status():
             assert host["status"] == "ok"
             assert host["status_code"] == 200
             assert "redirect_location" in host
+
+
+# --- search_public_incidents (mocked Responses API) --------------------------
+
+
+def _grounded_response(text, citations):
+    """Fake Responses API response: one web_search_call + cited output_text."""
+    return SimpleNamespace(
+        output=[
+            SimpleNamespace(type="web_search_call", status="completed"),
+            SimpleNamespace(
+                type="message",
+                status="completed",
+                role="assistant",
+                content=[
+                    SimpleNamespace(
+                        type="output_text",
+                        text=text,
+                        annotations=[
+                            SimpleNamespace(
+                                type="url_citation",
+                                url=url,
+                                title="source",
+                                start_index=0,
+                                end_index=1,
+                            )
+                            for url in citations
+                        ],
+                    )
+                ],
+            ),
+        ]
+    )
+
+
+class _ScriptedSearchClient:
+    """Fake ModelClient: script maps each query to queued (text, citations).
+
+    A query's script entry may also be an exception, raised on every
+    attempt. Retry attempts (query + appended errors) match by prefix.
+    """
+
+    script: dict = {}
+    calls: list = []
+
+    def __init__(self, role, **kwargs):
+        assert role == "public_records", role
+
+    def responses_search(self, attempt, *, instructions=None, **kwargs):
+        type(self).calls.append(attempt)
+        for query, pages in type(self).script.items():
+            if attempt == query or attempt.startswith(query + "\n"):
+                if isinstance(pages, Exception):
+                    raise pages
+                text, citations = pages.pop(0)
+                return _grounded_response(text, citations)
+        raise AssertionError(f"unexpected query {attempt!r}")
+
+
+@pytest.fixture
+def search_script(monkeypatch):
+    _ScriptedSearchClient.script = {}
+    _ScriptedSearchClient.calls = []
+    monkeypatch.setattr(incidents, "ModelClient", _ScriptedSearchClient)
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    return _ScriptedSearchClient
+
+
+COMPANY = "Acme Corporation"
+QUERIES = [
+    "Acme Corporation data breach",
+    "Acme Corporation security incident notification",
+    "Acme Corporation 8-K Item 1.05 cybersecurity incident",
+    f"{DOMAIN} breach notice attorney general",
+]
+
+
+def _incident_result(url, **overrides):
+    result = {
+        "type": "state_ag_breach_notice",
+        "date": "2025-08-14",
+        "summary": "Notice filed.",
+        "url": url,
+        "entity_match": "exact",
+        "match_basis": "Names the company.",
+    }
+    result.update(overrides)
+    return result
+
+
+def _empty_script(queries=QUERIES):
+    return {
+        query: [(json.dumps({"results": []}), [])] for query in queries
+    }
+
+
+def test_incidents_keeps_cited_result(search_script):
+    url = "https://ag.state.example/notices/acme-2025"
+    script = _empty_script()
+    script[QUERIES[0]] = [
+        (json.dumps({"results": [_incident_result(url)]}), [url])
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["collection_method"] == "search_grounding"
+    assert out["status"] == "ok"
+    assert out["queries_run"] == QUERIES
+    assert search_script.calls == QUERIES  # 4-search cap, one call each
+    assert out["dropped_uncited"] == 0
+    assert out["dropped_prohibited_source"] == 0
+    (kept,) = out["results"]
+    assert kept["url"] == url
+    assert kept["locator"] == url
+    assert kept["entity_match"] == "exact"
+    assert kept["counts_toward_findings"] is True
+    # Months computed in code from the result date, not from the model.
+    today = date.today()
+    assert out["disclosed_within_months"] == (
+        (today.year - 2025) * 12 + today.month - 8
+    )
+
+
+def test_incidents_drops_uncited_result(search_script):
+    script = _empty_script()
+    script[QUERIES[1]] = [
+        (
+            json.dumps(
+                {"results": [_incident_result("https://news.example/acme")]}
+            ),
+            [],
+        )
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["results"] == []
+    assert out["dropped_uncited"] == 1
+    assert out["dropped_prohibited_source"] == 0
+    assert out["disclosed_within_months"] is None
+    assert out["status"] == "ok"
+
+
+def test_incidents_drops_prohibited_sources(search_script):
+    paste = "https://pastebin.com/raw/acme53"
+    forum = "https://breachforums.example/thread/9"
+    script = _empty_script()
+    script[QUERIES[0]] = [
+        (
+            json.dumps(
+                {
+                    "results": [
+                        _incident_result(paste),
+                        _incident_result(forum),
+                    ]
+                }
+            ),
+            [paste, forum],
+        )
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["results"] == []
+    assert out["dropped_prohibited_source"] == 2
+    assert out["dropped_uncited"] == 0
+
+
+def test_incidents_uncertain_match_not_counted(search_script):
+    old = _incident_result(
+        "https://ag.state.example/notices/acme-old", date="2024-01-10"
+    )
+    new = _incident_result(
+        "https://news.example/acme-maybe",
+        date="2026-10-01",
+        type="press_report",
+        entity_match="uncertain",
+        match_basis="Same name, different state; could be another Acme.",
+    )
+    script = _empty_script()
+    script[QUERIES[0]] = [
+        (json.dumps({"results": [old, new]}), [old["url"], new["url"]])
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert len(out["results"]) == 2
+    uncertain = next(
+        r for r in out["results"] if r["entity_match"] == "uncertain"
+    )
+    assert uncertain["counts_toward_findings"] is False
+    # Most recent *counted* date is the older exact match.
+    today = date.today()
+    assert out["disclosed_within_months"] == (
+        (today.year - 2024) * 12 + today.month - 1
+    )
+
+
+def test_incidents_domain_fallback_and_query_cap(search_script):
+    expected = [
+        f"{DOMAIN} data breach",
+        f"{DOMAIN} security incident notification",
+        f"{DOMAIN} 8-K Item 1.05 cybersecurity incident",
+        f"{DOMAIN} breach notice attorney general",
+    ]
+    search_script.script = _empty_script(expected)
+    out = incidents.collect(DOMAIN)
+    assert out["queries_run"] == expected
+    assert len(search_script.calls) == 4
+
+
+def test_incidents_empty_results_is_ok(search_script):
+    search_script.script = _empty_script()
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "ok"
+    assert out["results"] == []
+    assert out["disclosed_within_months"] is None
+
+
+def test_incidents_retries_invalid_json_once(search_script):
+    url = "https://ag.state.example/notices/acme-retry"
+    script = _empty_script()
+    script[QUERIES[2]] = [
+        ("not json at all", []),
+        (json.dumps({"results": [_incident_result(url)]}), [url]),
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert [r["url"] for r in out["results"]] == [url]
+    # One retry inside the same search; still 4 searches run.
+    assert len(search_script.calls) == 5
+    assert out["queries_run"] == QUERIES
+    assert out["status"] == "ok"
+
+
+def test_incidents_impossible_date_triggers_retry(search_script):
+    url = "https://ag.state.example/notices/acme-date"
+    script = _empty_script()
+    script[QUERIES[0]] = [
+        (
+            json.dumps(
+                {"results": [_incident_result(url, date="2025-13-99")]}
+            ),
+            [url],
+        ),
+        (json.dumps({"results": [_incident_result(url)]}), [url]),
+    ]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert [r["url"] for r in out["results"]] == [url]
+    assert out["disclosed_within_months"] is not None
+
+
+def test_incidents_invalid_json_twice_fails_query(search_script):
+    script = _empty_script()
+    script[QUERIES[0]] = [("nope", []), ("still nope", [])]
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "partial"
+    assert out["results"] == []
+
+
+def test_incidents_failed_query_degrades_gracefully(search_script):
+    script = _empty_script()
+    script[QUERIES[0]] = RuntimeError("boom")
+    search_script.script = script
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "partial"
+    assert out["queries_run"] == QUERIES
+    search_script.script = {query: RuntimeError("down") for query in QUERIES}
+    out = incidents.collect(DOMAIN, company_name=COMPANY)
+    assert out["status"] == "error"
+    assert out["results"] == []
+    assert out["disclosed_within_months"] is None
+
+
+def test_run_passes_company_name_to_incidents(search_script):
+    search_script.script = _empty_script()
+    out = run("search_public_incidents", DOMAIN, company_name=COMPANY)
+    assert out["queries_run"] == QUERIES
+
+
+def test_incidents_demo_mode_returns_fixture(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "1")
+    out = run("search_public_incidents", DOMAIN, company_name="Acme")
+    assert out == _brightwater_fixture()["search_public_incidents"]
+    assert out["results"][0]["entity_match"] == "exact"
+    assert out["results"][0]["counts_toward_findings"] is True
+    copper = json.loads(
+        (FIXTURES_DIR / "copperline.example.json").read_text(encoding="utf-8")
+    )
+    out = run("search_public_incidents", "copperline.example")
+    assert out == copper["search_public_incidents"]
+    assert out["results"] == []
+    assert out["disclosed_within_months"] is None

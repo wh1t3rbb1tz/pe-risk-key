@@ -6,6 +6,7 @@ from pe_risk_key.collectors import (  # noqa: F401
     email_auth,
     web_posture,
     kev,
+    incidents,
 )
 from pe_risk_key.collectors.net import SafetyBoundaryError
 from pe_risk_key.collectors.registry import (

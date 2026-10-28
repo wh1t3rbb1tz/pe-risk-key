@@ -101,7 +101,8 @@
                   "transcription",
                   "claim_extraction",
                   "crosscheck",
-                  "narrative"
+                  "narrative",
+                  "public_records"
                 ]
               },
               "provider": {

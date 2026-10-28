@@ -46,6 +46,7 @@ Role = Literal[
     "claim_extraction",
     "crosscheck",
     "narrative",
+    "public_records",
 ]
 Mode = Literal["standard", "confidential"]
 
@@ -54,11 +55,12 @@ STANDARD_PROVIDER = "meta_model_api"
 
 WONDER_MODEL = "muse-wonder-1.0"
 VOICE_MODEL = "muse-voice-transcribe-1.0"
-# Reserved for cheap sub-tasks; currently unassigned to any role.
+# Cheap sub-tasks: grounded public-records searches.
 SPARK_MODEL = "muse-spark-1.3"
 
 # SPEC §3: muse-wonder-1.0 for agent/analysis work,
-# muse-voice-transcribe-1.0 for transcription.
+# muse-voice-transcribe-1.0 for transcription, muse-spark-1.3 for
+# search-grounded public-records lookups.
 ROLE_MODELS: dict[str, str] = {
     "orchestrator": WONDER_MODEL,
     "document_analysis": WONDER_MODEL,
@@ -66,6 +68,7 @@ ROLE_MODELS: dict[str, str] = {
     "claim_extraction": WONDER_MODEL,
     "crosscheck": WONDER_MODEL,
     "narrative": WONDER_MODEL,
+    "public_records": SPARK_MODEL,
 }
 
 _RETRYABLE_STATUS = 429
@@ -288,15 +291,46 @@ class ModelClient:
         if usage is None:
             return
         details = getattr(usage, "prompt_tokens_details", None)
+        # Chat completions report prompt/completion tokens; the Responses
+        # API reports input/output tokens.
         self.total_usage["prompt_tokens"] += (
-            getattr(usage, "prompt_tokens", 0) or 0
+            getattr(usage, "prompt_tokens", 0)
+            or getattr(usage, "input_tokens", 0)
+            or 0
         )
         self.total_usage["completion_tokens"] += (
-            getattr(usage, "completion_tokens", 0) or 0
+            getattr(usage, "completion_tokens", 0)
+            or getattr(usage, "output_tokens", 0)
+            or 0
         )
         self.total_usage["cached_tokens"] += (
             getattr(details, "cached_tokens", 0) or 0
         )
+
+    def responses_search(
+        self,
+        query: str,
+        *,
+        instructions: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """One grounded search via the Responses API; retries on 429/transients.
+
+        Sends ``tools=[{"type": "web_search"}]`` per
+        https://dev.meta.ai/docs/search-grounding: the model decides
+        whether to search, and citations come back as ``url_citation``
+        annotations on ``output_text`` blocks. Token usage accumulates
+        on ``self.total_usage`` across calls.
+        """
+        kwargs.setdefault("model", self.model)
+        kwargs.setdefault("tools", [{"type": "web_search"}])
+        if instructions is not None:
+            kwargs["instructions"] = instructions
+        response = self._with_retry(
+            self._client.responses.create, input=query, **kwargs
+        )
+        self._accumulate_usage(response)
+        return response
 
     def chat_json(
         self,

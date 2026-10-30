@@ -9,3 +9,4 @@ __pycache__/
 node_modules/
 *.m4a
 *.wav
+!fixtures/interviews/brightwater_cto_interview.wav

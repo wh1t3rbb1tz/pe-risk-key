@@ -3,7 +3,9 @@
 > Fictional diligence call for PE Risk Key testing. Record it yourself with two
 > voices (you as the diligence lead, a second person as the CTO). Read naturally;
 > small ad-libs are fine and make the transcript more realistic. Target length is
-> about 4 minutes. Save as `fixtures/interviews/brightwater_cto_interview.m4a`.
+> about 4 minutes. Or render it synthetically with
+> `scripts/make_synthetic_interview.py` into
+> `fixtures/interviews/brightwater_cto_interview.wav`.
 >
 > Bracketed notes are for you, not for reading aloud. They map each claim to the
 > evidence it should be checked against and the expected verdict.

@@ -1,0 +1,84 @@
+{
+  "voices": {
+    "Diligence Lead": "Daniel",
+    "Dana": "Samantha"
+  },
+  "turns": [
+    {
+      "turn": 1,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 2,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 3,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 4,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 5,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 6,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 7,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 8,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 9,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 10,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 11,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 12,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 13,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 14,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 15,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 16,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 17,
+      "speaker": "Diligence Lead"
+    },
+    {
+      "turn": 18,
+      "speaker": "Dana"
+    },
+    {
+      "turn": 19,
+      "speaker": "Diligence Lead"
+    }
+  ]
+}

@@ -53,8 +53,8 @@ def _exception(
     control_id,
     quote,
     control_ref=None,
-    deviations=1,
-    sample_size=10,
+    deviations=None,
+    sample_size=None,
     management_response="Management acknowledged.",
     locator="Section 4",
     deal_impact="Deal impact sentence.",
@@ -217,7 +217,9 @@ def test_text_extraction_end_to_end(soc2_env):
     )
     assert exception["finding_id"] == "F-001"
     assert result.signals["bridge_gap_days"] == 213
-    assert result.signals["exceptions"] == [{"control_id": "CC6.1"}]
+    assert result.signals["exceptions"] == [
+        {"control_id": "CC6.1", "control_ref": "CC6.1-01"}
+    ]
     assert [f["rule_id"] for f in result.findings] == [
         "SOC2-EXCEPTION-ACCESS",
         "SOC2-BRIDGE-GAP",
@@ -392,8 +394,8 @@ def test_exception_rule_mapping(soc2_env):
     unmapped = result.soc2_analysis["exceptions"][-1]
     assert unmapped["control_id"] == "CC1.1"
     assert "finding_id" not in unmapped
-    assert unmapped["deviations"] == 0
-    assert unmapped["sample_size"] == 0
+    assert unmapped["deviations"] is None
+    assert unmapped["sample_size"] is None
     assert "management_response" not in unmapped
     assert result.soc2_analysis["exceptions"][0]["finding_id"] == "F-001"
 
@@ -661,3 +663,127 @@ def test_normalize_typography_and_markup():
     assert _normalize("Nov 10–23, 2025") == "nov 10-23, 2025"
     assert _normalize("exam-\nple") == "example"
     assert _normalize("  Mixed\tCASE\n") == "mixed case"
+
+
+def test_control_id_derived_from_ref(soc2_env):
+    client, report = soc2_env
+    quote = "Result: 2 of 25 reviews were not evidenced."
+    client.extraction = _extraction(
+        exceptions=[
+            _exception(
+                "CC6.1-01",
+                quote,
+                control_ref="CC6.1-01",
+                deviations=2,
+                sample_size=25,
+            )
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    result = analyze_soc2(report, "doc_x", AS_OF)
+    assert [f["rule_id"] for f in result.findings] == [
+        "SOC2-EXCEPTION-ACCESS"
+    ]
+    assert result.soc2_analysis["exceptions"][0]["control_id"] == "CC6.1"
+    assert result.signals["exceptions"] == [
+        {"control_id": "CC6.1", "control_ref": "CC6.1-01"}
+    ]
+    # Ref missing: the full control_id value is kept as the ref.
+    client.extraction = _extraction(
+        exceptions=[
+            _exception(
+                "CC6.1-01",
+                quote,
+                control_ref=None,
+                deviations=2,
+                sample_size=25,
+            )
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    result = analyze_soc2(report, "doc_x", AS_OF)
+    assert [f["rule_id"] for f in result.findings] == [
+        "SOC2-EXCEPTION-ACCESS"
+    ]
+    assert result.signals["exceptions"] == [
+        {"control_id": "CC6.1", "control_ref": "CC6.1-01"}
+    ]
+
+
+FIXTURE_CC72 = (
+    "Exception noted. For 2 consecutive weeks (Nov 10-23, 2025), alerts "
+    "were forwarded to a decommissioned distribution list and were not "
+    "reviewed."
+)
+
+
+def test_cc72_ungrounded_deviations_null(soc2_env):
+    client, _ = soc2_env
+    client.extraction = _extraction(
+        opinion_quote=FIXTURE_OPINION,
+        exceptions=[
+            _exception(
+                "CC7.2",
+                FIXTURE_CC72,
+                control_ref="CC7.2-01",
+                deviations=5,
+                sample_size=30,
+                locator="Section 4, CC7.2-01",
+            )
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    # Sample size 30 is grounded in the auditor test; deviations 5 appears
+    # nowhere, so only deviations is nulled.
+    client.extraction["exceptions"][0]["auditor_test"] = (
+        "Selected 30 days and inspected alert review evidence."
+    )
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    (entry,) = result.soc2_analysis["exceptions"]
+    assert entry["deviations"] is None
+    assert entry["sample_size"] == 30
+    assert result.signals["exceptions"] == [
+        {
+            "control_id": "CC7.2",
+            "control_ref": "CC7.2-01",
+            "counts_not_stated": True,
+        }
+    ]
+    assert result.dropped_unquoted == []
+
+
+def test_cc61_grounded_counts_kept(soc2_env):
+    client, _ = soc2_env
+    client.extraction = _extraction(
+        opinion_quote=FIXTURE_OPINION,
+        exceptions=[
+            _exception(
+                "CC6.1",
+                FIXTURE_CC61,
+                control_ref="CC6.1-01",
+                deviations=4,
+                sample_size=25,
+                locator="Section 4, CC6.1-01",
+            )
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    (entry,) = result.soc2_analysis["exceptions"]
+    assert entry["deviations"] == 4
+    assert entry["sample_size"] == 25
+    assert result.signals["exceptions"] == [
+        {"control_id": "CC6.1", "control_ref": "CC6.1-01"}
+    ]

@@ -31,9 +31,10 @@ def print_report(result) -> None:
     if not analysis["exceptions"]:
         print("  -")
     for item in analysis["exceptions"]:
+        deviations = item["deviations"] if item["deviations"] is not None else "n/s"
+        sample = item["sample_size"] if item["sample_size"] is not None else "n/s"
         print(
-            f"  {item['control_id']}: {item['deviations']}/"
-            f"{item['sample_size']} deviations "
+            f"  {item['control_id']}: {deviations}/{sample} deviations "
             f"[{item['locator']}]"
             + (f" -> {item['finding_id']}" if "finding_id" in item else "")
         )

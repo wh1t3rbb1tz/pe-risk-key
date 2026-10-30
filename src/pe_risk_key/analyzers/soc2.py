@@ -52,7 +52,8 @@ SYSTEM_PROMPT = """You extract a SOC 2 report into structured data. Rules:
 5. Normalize enums: report_type to type1/type2, trust categories to security/availability/confidentiality/processing_integrity/privacy, subservice method to carve_out/inclusive. Dates as YYYY-MM-DD.
 6. critical is true for a subservice org only if it hosts production systems or processes the data in scope.
 7. notable_observations are items that are not exceptions but matter for diligence: pen-test findings noted in a "no exceptions" row, unaudited management statements about bridge letters, scope limits. Each needs text, a locator, and a verbatim quote.
-8. bridge_letter_provided is true only if a bridge letter covers the gap through the assessment date given with the report."""
+8. bridge_letter_provided is true only if a bridge letter covers the gap through the assessment date given with the report.
+9. Report deviations and sample_size counts only if stated verbatim in the report; otherwise null. Never calculate or estimate counts."""
 
 
 @dataclass
@@ -175,6 +176,58 @@ def _has_locator(item: dict) -> bool:
     return isinstance(locator, str) and bool(locator.strip())
 
 
+_CRITERION_RE = re.compile(r"^((?:CC|A|C|PI|P)\d+\.\d+)")
+_NUMBER_RE = re.compile(r"\d+")
+
+
+def _derive_criteria(exceptions: list[dict]) -> None:
+    """Set each control_id to its leading criterion, in place.
+
+    Matches control_ref first, then control_id, so CC6.1-01 becomes
+    CC6.1 either way. The full ref is kept as control_ref; items with
+    no recognizable criterion are left untouched.
+    """
+    for item in exceptions:
+        for key in ("control_ref", "control_id"):
+            candidate = item.get(key)
+            if not isinstance(candidate, str):
+                continue
+            match = _CRITERION_RE.match(candidate.strip().upper())
+            if match is None:
+                continue
+            if candidate.strip() != match.group(1) and not item.get(
+                "control_ref"
+            ):
+                item["control_ref"] = candidate.strip()
+            item["control_id"] = match.group(1)
+            break
+
+
+def _ground_counts(exceptions: list[dict]) -> None:
+    """Null counts that appear nowhere in the quote or auditor test.
+
+    A count is grounded only when its digits appear as a whole number
+    in the verified quote or auditor_test text. Ungrounded counts are
+    set to null and flagged counts_not_stated.
+    """
+    for item in exceptions:
+        numbers = {
+            int(token)
+            for text in (item.get("quote"), item.get("auditor_test"))
+            for token in _NUMBER_RE.findall(
+                _normalize(text if isinstance(text, str) else "")
+            )
+        }
+        ungrounded = False
+        for key in ("deviations", "sample_size"):
+            value = item.get(key)
+            if value is not None and value not in numbers:
+                item[key] = None
+                ungrounded = True
+        if ungrounded:
+            item["counts_not_stated"] = True
+
+
 def _filter_items(
     items: list[dict],
     kind: str,
@@ -263,6 +316,7 @@ def analyze_soc2(
     )
 
     normalized_source = _normalize(source_text)
+    _derive_criteria(extraction.get("exceptions", []))
     dropped_unquoted: list[dict] = []
     dropped_no_locator: list[dict] = []
     exceptions, unquoted, no_loc = _filter_items(
@@ -292,6 +346,7 @@ def analyze_soc2(
         "name",
     )
     dropped_no_locator.extend(no_loc)
+    _ground_counts(exceptions)
 
     opinion_quote, opinion_diagnostics = _verify_quote(
         extraction.get("opinion_quote"), normalized_source
@@ -446,8 +501,8 @@ def analyze_soc2(
         entry: dict[str, Any] = {
             "control_id": item["control_id"],
             "description": item["description"],
-            "deviations": item.get("deviations") or 0,
-            "sample_size": item.get("sample_size") or 0,
+            "deviations": item.get("deviations"),
+            "sample_size": item.get("sample_size"),
             "locator": item["locator"],
         }
         if item.get("management_response"):
@@ -501,7 +556,20 @@ def analyze_soc2(
         notable_observations=notables,
         signals={
             "exceptions": [
-                {"control_id": item["control_id"]} for item in exceptions
+                {
+                    "control_id": item["control_id"],
+                    **(
+                        {"control_ref": item["control_ref"]}
+                        if item.get("control_ref")
+                        else {}
+                    ),
+                    **(
+                        {"counts_not_stated": True}
+                        if item.get("counts_not_stated")
+                        else {}
+                    ),
+                }
+                for item in exceptions
             ],
             "subservice_orgs": [
                 {

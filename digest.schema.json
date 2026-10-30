@@ -785,12 +785,14 @@
                 "type": "string"
               },
               "deviations": {
-                "type": "integer",
-                "minimum": 0
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "description": "null when the report does not state the count"
               },
               "sample_size": {
-                "type": "integer",
-                "minimum": 0
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "description": "null when the report does not state the count"
               },
               "management_response": {
                 "type": "string"

@@ -55,6 +55,9 @@ STANDARD_PROVIDER = "meta_model_api"
 
 WONDER_MODEL = "muse-wonder-1.0"
 VOICE_MODEL = "muse-voice-transcribe-1.0"
+# Standard-mode Muse Wonder prices per 1M tokens, per
+# https://dev.meta.ai/docs/pricing-rate-limits.
+WONDER_USD_PER_MTOK = {"input": 4.0, "cached": 0.20, "output": 20.0}
 # Cheap sub-tasks: grounded public-records searches.
 SPARK_MODEL = "muse-spark-1.3"
 

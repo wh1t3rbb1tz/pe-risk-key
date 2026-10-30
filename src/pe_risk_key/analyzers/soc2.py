@@ -9,8 +9,10 @@ wired into the orchestrator.
 from __future__ import annotations
 
 import copy
+import difflib
 import hashlib
 import io
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -61,6 +63,7 @@ class SOC2Result:
     filename: str
     sha256: str
     opinion_quote: str
+    opinion_verified: bool
     soc2_analysis: dict[str, Any]
     notable_observations: list[dict[str, Any]]
     signals: dict[str, Any]
@@ -91,20 +94,80 @@ def _read_text(path: Path) -> tuple[str, bytes]:
     )
 
 
+_TYPO_TRANSLATE = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2026": "...",
+    }
+)
+
+
 def _normalize(text: str) -> str:
-    return " ".join(text.split())
+    """Markdown-aware normalization, applied identically to source/quote."""
+    text = text.replace("`", "").replace("*", "").replace("_", "")
+    text = text.replace("|", " ")
+    text = text.translate(_TYPO_TRANSLATE)
+    text = re.sub(r"-\r?\n\s*", "", text)
+    return " ".join(text.split()).casefold()
 
 
-def _verified_quote(quote: Any, source: str) -> str | None:
-    """Truncated quote when it appears verbatim in the source, else None."""
+def _segments_in_order(segments: list[str], source: str) -> bool:
+    position = 0
+    for segment in segments:
+        found = source.find(segment, position)
+        if found == -1:
+            return False
+        position = found + len(segment)
+    return True
+
+
+def _closest_window(quote: str, source: str) -> tuple[str, float]:
+    """Best-matching source window for a failed quote (diagnostics only)."""
+    width = min(len(quote), len(source))
+    if width == 0:
+        return "", 0.0
+    matcher = difflib.SequenceMatcher(None, quote, "")
+    best = ("", 0.0)
+    step = max(1, width // 8)
+    for start in range(0, len(source) - width + 1, step):
+        window = source[start : start + width]
+        matcher.set_seq2(window)
+        ratio = matcher.ratio()
+        if ratio > best[1]:
+            best = (window, ratio)
+    return best[0], round(best[1], 3)
+
+
+def _verify_quote(
+    quote: Any, normalized_source: str
+) -> tuple[str | None, dict[str, Any]]:
+    """Verbatim check after normalization; strict only, no fuzzy matching.
+
+    Returns (verified quote, {}) on success, else (None, diagnostics)
+    with the closest source window and its similarity ratio.
+    """
     if not isinstance(quote, str):
-        return None
+        return None, {"closest_window": "", "similarity_ratio": 0.0}
     truncated = quote.strip()[:MAX_QUOTE_CHARS]
-    if not truncated:
-        return None
-    if _normalize(truncated) not in _normalize(source):
-        return None
-    return truncated
+    normalized = _normalize(truncated)
+    if not normalized.strip(". "):
+        return None, {"closest_window": "", "similarity_ratio": 0.0}
+    if "..." in normalized:
+        segments = [s for s in (s.strip() for s in normalized.split("...")) if s]
+        matched = bool(segments) and _segments_in_order(
+            segments, normalized_source
+        )
+    else:
+        matched = normalized in normalized_source
+    if matched:
+        return truncated, {}
+    window, ratio = _closest_window(normalized, normalized_source)
+    return None, {"closest_window": window, "similarity_ratio": ratio}
 
 
 def _has_locator(item: dict) -> bool:
@@ -113,7 +176,10 @@ def _has_locator(item: dict) -> bool:
 
 
 def _filter_items(
-    items: list[dict], kind: str, source: str, ref_key: str | None
+    items: list[dict],
+    kind: str,
+    normalized_source: str,
+    ref_key: str | None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Keep quoted + located items; collect unquoted and locator drops."""
     kept: list[dict] = []
@@ -126,9 +192,11 @@ def _filter_items(
             no_locator.append({"type": kind, "ref": ref})
             continue
         if "quote" in item:
-            verified = _verified_quote(item.get("quote"), source)
+            verified, diagnostics = _verify_quote(
+                item.get("quote"), normalized_source
+            )
             if verified is None:
-                unquoted.append({"type": kind, "ref": ref})
+                unquoted.append({"type": kind, "ref": ref, **diagnostics})
                 continue
             item = {**item, "quote": verified}
         kept.append(item)
@@ -194,36 +262,48 @@ def analyze_soc2(
         reasoning_effort="medium",
     )
 
+    normalized_source = _normalize(source_text)
     dropped_unquoted: list[dict] = []
     dropped_no_locator: list[dict] = []
     exceptions, unquoted, no_loc = _filter_items(
-        extraction.get("exceptions", []), "exception", source_text, "control_id"
+        extraction.get("exceptions", []),
+        "exception",
+        normalized_source,
+        "control_id",
     )
     dropped_unquoted.extend(unquoted)
     dropped_no_locator.extend(no_loc)
     notables, unquoted, no_loc = _filter_items(
         extraction.get("notable_observations", []),
         "notable_observation",
-        source_text,
+        normalized_source,
         None,
     )
     dropped_unquoted.extend(unquoted)
     dropped_no_locator.extend(no_loc)
     cuecs, _, no_loc = _filter_items(
-        extraction.get("cuecs", []), "cuec", source_text, None
+        extraction.get("cuecs", []), "cuec", normalized_source, None
     )
     dropped_no_locator.extend(no_loc)
     orgs, _, no_loc = _filter_items(
-        extraction.get("subservice_orgs", []), "subservice_org", source_text, "name"
+        extraction.get("subservice_orgs", []),
+        "subservice_org",
+        normalized_source,
+        "name",
     )
     dropped_no_locator.extend(no_loc)
 
-    opinion_quote = _verified_quote(
-        extraction.get("opinion_quote"), source_text
+    opinion_quote, opinion_diagnostics = _verify_quote(
+        extraction.get("opinion_quote"), normalized_source
     )
     if opinion_quote is None:
-        dropped_unquoted.append({"type": "opinion", "ref": "opinion"})
-        opinion_quote = ""
+        dropped_unquoted.append(
+            {"type": "opinion", "ref": "opinion", **opinion_diagnostics}
+        )
+        opinion_quote = extraction.get("opinion_quote") or ""
+        opinion_verified = False
+    else:
+        opinion_verified = True
 
     try:
         period_end = date.fromisoformat(extraction["period_end"])
@@ -416,6 +496,7 @@ def analyze_soc2(
         filename=file_path.name,
         sha256=hashlib.sha256(raw).hexdigest(),
         opinion_quote=opinion_quote,
+        opinion_verified=opinion_verified,
         soc2_analysis=soc2_analysis,
         notable_observations=notables,
         signals={

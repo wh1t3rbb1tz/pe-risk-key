@@ -202,6 +202,7 @@ def test_text_extraction_end_to_end(soc2_env):
     assert result.filename == "report.md"
     assert result.sha256 == hashlib.sha256(SOC_TEXT.encode()).hexdigest()
     assert result.opinion_quote == OPINION_QUOTE
+    assert result.opinion_verified is True
     analysis = result.soc2_analysis
     assert analysis["report_type"] == "type2"
     assert analysis["opinion"] == "unqualified"
@@ -302,7 +303,11 @@ def test_fabricated_quote_dropped(soc2_env):
         bridge_letter_provided=True,
     )
     result = analyze_soc2(report, "doc_x", AS_OF)
-    assert result.dropped_unquoted == [{"type": "exception", "ref": "CC6.1"}]
+    (drop,) = result.dropped_unquoted
+    assert drop["type"] == "exception"
+    assert drop["ref"] == "CC6.1"
+    assert isinstance(drop["similarity_ratio"], float)
+    assert drop["closest_window"]
     assert result.soc2_analysis["exceptions"] == []
     assert result.signals["exceptions"] == []
     assert result.findings == []
@@ -451,7 +456,7 @@ def test_opinion_values(soc2_env, opinion):
     assert result.opinion_quote == OPINION_QUOTE
 
 
-def test_fabricated_opinion_quote_cleared(soc2_env):
+def test_unverified_opinion_quote_flagged(soc2_env):
     client, report = soc2_env
     client.extraction = _extraction(
         opinion_quote="The auditor loved everything.",
@@ -462,8 +467,13 @@ def test_fabricated_opinion_quote_cleared(soc2_env):
         bridge_letter_provided=True,
     )
     result = analyze_soc2(report, "doc_x", AS_OF)
-    assert result.dropped_unquoted == [{"type": "opinion", "ref": "opinion"}]
-    assert result.opinion_quote == ""
+    (drop,) = result.dropped_unquoted
+    assert drop["type"] == "opinion"
+    assert drop["ref"] == "opinion"
+    assert isinstance(drop["similarity_ratio"], float)
+    assert result.opinion_quote == "The auditor loved everything."
+    assert result.opinion_verified is False
+    assert result.soc2_analysis["opinion"] == "unqualified"
 
 
 def test_id_offsets(soc2_env):
@@ -522,3 +532,132 @@ def test_unsupported_extension_rejected(soc2_env, tmp_path):
     with pytest.raises(ValueError, match="Unsupported SOC 2 file type"):
         analyze_soc2(bad, "doc_x", AS_OF)
     assert client.calls == []
+
+
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures/documents/brightwater_soc2_type2.md"
+)
+
+FIXTURE_OPINION = (
+    "In our opinion, in all material respects, the description presents "
+    "the system as designed and implemented, and the controls stated in "
+    "the description were suitably designed and operated effectively "
+    "throughout the period, except for the deviations described in "
+    "Section 4, which did not, in our judgment, rise to a level that "
+    "would modify our opinion."
+)
+
+FIXTURE_CC61 = (
+    "Exception noted. 4 of 25 sampled admin accounts were not enforced "
+    "for MFA."
+)
+
+FIXTURE_SPANNING = (
+    "enforcement configuration. Exception noted. 4 of 25 sampled admin "
+    "accounts were not enforced for MFA."
+)
+
+
+def _fixture_extraction():
+    return _extraction(
+        auditor="Halvorsen & Pike LLP",
+        opinion_quote=FIXTURE_OPINION,
+        exceptions=[
+            _exception("CC6.1", FIXTURE_CC61, locator="Section 4, CC6.1-01")
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[
+            {
+                "text": "Spanning observation.",
+                "locator": "Section 4",
+                "quote": FIXTURE_SPANNING,
+            }
+        ],
+        bridge_letter_provided=False,
+    )
+
+
+def test_fixture_cc61_result_verifies(soc2_env):
+    client, _ = soc2_env
+    client.extraction = _fixture_extraction()
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    assert [
+        item["control_id"] for item in result.soc2_analysis["exceptions"]
+    ] == ["CC6.1"]
+    assert result.dropped_unquoted == []
+
+
+def test_fixture_opinion_verifies(soc2_env):
+    client, _ = soc2_env
+    client.extraction = _fixture_extraction()
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    assert result.opinion_verified is True
+    assert result.opinion_quote == FIXTURE_OPINION
+
+
+def test_fixture_bold_spanning_quote_verifies(soc2_env):
+    client, _ = soc2_env
+    client.extraction = _fixture_extraction()
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    assert len(result.notable_observations) == 1
+    assert result.notable_observations[0]["quote"] == FIXTURE_SPANNING
+
+
+def test_ellipsis_quote_requires_ordered_segments():
+    from pe_risk_key.analyzers.soc2 import _normalize, _verify_quote
+
+    source = _normalize(
+        "4 of 25 sampled admin accounts were not enforced for MFA. These "
+        "were service-desk accounts created via a legacy provisioning "
+        "script that bypassed the conditional access policy."
+    )
+    ok, _ = _verify_quote(
+        "4 of 25 sampled admin accounts were not enforced for MFA. ... "
+        "bypassed the conditional access policy.",
+        source,
+    )
+    assert ok is not None
+    bad, diagnostics = _verify_quote(
+        "bypassed the conditional access policy. ... "
+        "4 of 25 sampled admin accounts",
+        source,
+    )
+    assert bad is None
+    assert diagnostics["similarity_ratio"] >= 0.0
+
+
+def test_hyphenated_line_break_verifies(soc2_env, tmp_path):
+    client, _ = soc2_env
+    path = tmp_path / "hyphen.md"
+    sentence = "The controls were suitably designed and operated effectively."
+    path.write_text(
+        "The controls were suitably desig-\nned and operated effectively.\n",
+        encoding="utf-8",
+    )
+    client.extraction = _extraction(
+        opinion_quote=sentence,
+        exceptions=[_exception("CC6.1", sentence)],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    result = analyze_soc2(path, "doc_h", AS_OF)
+    assert [
+        item["control_id"] for item in result.soc2_analysis["exceptions"]
+    ] == ["CC6.1"]
+    assert result.opinion_verified is True
+    assert result.dropped_unquoted == []
+
+
+def test_normalize_typography_and_markup():
+    from pe_risk_key.analyzers.soc2 import _normalize
+
+    assert _normalize("**Bold** and `code` and _em_") == "bold and code and em"
+    assert _normalize("| a | b |") == "a b"
+    assert _normalize("“Hi” — it’s …") == '"hi" - it\'s ...'
+    assert _normalize("Nov 10–23, 2025") == "nov 10-23, 2025"
+    assert _normalize("exam-\nple") == "example"
+    assert _normalize("  Mixed\tCASE\n") == "mixed case"

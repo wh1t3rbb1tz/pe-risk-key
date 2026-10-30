@@ -18,7 +18,11 @@ def print_report(result) -> None:
     analysis = result.soc2_analysis
     print(f"=== analyze_soc2: {result.filename} ({result.doc_id}) ===")
     print(f"\nopinion: {analysis['opinion']}")
-    print(f"  quote: {result.opinion_quote or '-'}")
+    if result.opinion_verified:
+        print(f"  quote: {result.opinion_quote or '-'}")
+    else:
+        print("  WARNING: opinion quote could not be verified against the source text.")
+        print(f"  quote (unverified): {result.opinion_quote or '-'}")
     print(
         f"\nperiod: {analysis['period_start']} to {analysis['period_end']} "
         f"({analysis['auditor']}, {analysis['report_type']})"
@@ -66,8 +70,12 @@ def print_report(result) -> None:
         f"\ndrops: {len(result.dropped_unquoted)} unquoted, "
         f"{len(result.dropped_no_locator)} without locator"
     )
-    for drop in result.dropped_unquoted + result.dropped_no_locator:
+    for drop in result.dropped_unquoted:
         print(f"  {drop['type']}: {drop['ref']}")
+        print(f"    closest window: {drop.get('closest_window', '')[:160]}")
+        print(f"    similarity: {drop.get('similarity_ratio', 0.0)}")
+    for drop in result.dropped_no_locator:
+        print(f"  {drop['type']}: {drop['ref']} (no locator)")
     usage = result.usage
     print(
         f"\ntokens: input={usage['prompt_tokens']} "

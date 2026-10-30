@@ -1,0 +1,244 @@
+{
+  "created_at": "20261030T224530Z",
+  "as_of": "2026-10-30",
+  "result": {
+    "doc_id": "doc_brightwatersoc2type2",
+    "filename": "brightwater_soc2_type2.md",
+    "sha256": "d48efc43cbc8ad5626a1ea65572681be201490b68183e165d9e6870d8dcdf59c",
+    "opinion_quote": "",
+    "soc2_analysis": {
+      "doc_id": "doc_brightwatersoc2type2",
+      "report_type": "type2",
+      "period_start": "2025-04-01",
+      "period_end": "2026-03-31",
+      "auditor": "Halvorsen & Pike LLP",
+      "opinion": "unqualified",
+      "trust_services_categories": [
+        "security",
+        "availability"
+      ],
+      "exceptions": [],
+      "subservice_orgs": [
+        {
+          "name": "Nimbus Cloud Services",
+          "method": "carve_out",
+          "services": "Infrastructure hosting; production workloads run in Nimbus Cloud Services.",
+          "critical": true
+        },
+        {
+          "name": "LedgerPay Payroll",
+          "method": "carve_out",
+          "services": "HR and payroll processing, including employee termination records.",
+          "critical": false
+        }
+      ],
+      "cuecs": [
+        "Provisioning and de-provisioning their own users' access to the Brightwater platform.",
+        "Enabling SSO/MFA for their users through the customer administration console.",
+        "Reviewing user access to the platform at least quarterly.",
+        "Notifying Brightwater promptly of suspected security incidents involving their accounts.",
+        "Securing API credentials issued to them."
+      ],
+      "bridge_gap_days": 213
+    },
+    "notable_observations": [
+      {
+        "locator": "Section 4, Table, CC4.1-01 Result",
+        "quote": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control.",
+        "text": "Independent penetration test dated September 2025 reported 2 high-severity findings. This row is not an exception, but remediation status was outside the scope of the control, so evidence of remediation should be requested."
+      },
+      {
+        "locator": "Section 5 \u2014 Other Information Provided by Management (unaudited)",
+        "quote": "Management plans to obtain a bridge letter covering April 1, 2026 forward upon request.",
+        "text": "Management statement about a bridge letter is unaudited and describes a plan to obtain one upon request, not an issued bridge letter covering the gap through the assessment date of 2026-10-30. A coverage gap therefore remains from 2026-04-01 onward."
+      }
+    ],
+    "signals": {
+      "exceptions": [],
+      "subservice_orgs": [
+        {
+          "name": "Nimbus Cloud Services",
+          "method": "carve_out",
+          "critical": true
+        },
+        {
+          "name": "LedgerPay Payroll",
+          "method": "carve_out",
+          "critical": false
+        }
+      ],
+      "bridge_gap_days": 213
+    },
+    "evidence_pool": [
+      {
+        "evidence_id": "E-001",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Subservice organizations; Section 3.2, Infrastructure",
+        "excerpt": "Nimbus Cloud Services is carved out of scope: Infrastructure hosting; production workloads run in Nimbus Cloud Services.."
+      },
+      {
+        "evidence_id": "E-002",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Subservice organizations",
+        "excerpt": "LedgerPay Payroll is carved out of scope: HR and payroll processing, including employee termination records.."
+      },
+      {
+        "evidence_id": "E-003",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, Complementary User Entity Controls (CUECs), item 1",
+        "excerpt": "Provisioning and de-provisioning their own users' access to the Brightwater platform."
+      },
+      {
+        "evidence_id": "E-004",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, Complementary User Entity Controls (CUECs), item 2",
+        "excerpt": "Enabling SSO/MFA for their users through the customer administration console."
+      },
+      {
+        "evidence_id": "E-005",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, Complementary User Entity Controls (CUECs), item 3",
+        "excerpt": "Reviewing user access to the platform at least quarterly."
+      },
+      {
+        "evidence_id": "E-006",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, Complementary User Entity Controls (CUECs), item 4",
+        "excerpt": "Notifying Brightwater promptly of suspected security incidents involving their accounts."
+      },
+      {
+        "evidence_id": "E-007",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, Complementary User Entity Controls (CUECs), item 5",
+        "excerpt": "Securing API credentials issued to them."
+      },
+      {
+        "evidence_id": "E-008",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, Table, CC4.1-01 Result",
+        "excerpt": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control."
+      },
+      {
+        "evidence_id": "E-009",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 5 \u2014 Other Information Provided by Management (unaudited)",
+        "excerpt": "Management plans to obtain a bridge letter covering April 1, 2026 forward upon request."
+      },
+      {
+        "evidence_id": "E-010",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "brightwater_soc2_type2.md (report period)",
+        "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30."
+      }
+    ],
+    "findings": [
+      {
+        "finding_id": "F-001",
+        "title": "SOC 2 report period ended more than 90 days ago; no bridge letter provided",
+        "severity": "medium",
+        "confidence": "high",
+        "csf_function": "GV",
+        "csf_category": "GV.OV",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-010",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "brightwater_soc2_type2.md (report period)",
+            "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30."
+          }
+        ],
+        "deal_impact": "Report period ended 2026-03-31, 213 days before the assessment date; controls may have changed since.",
+        "remediation": {
+          "summary": "Obtain a bridge letter covering through 2026-10-30.",
+          "cost_low_usd": 2000,
+          "cost_high_usd": 10000,
+          "effort_weeks": 3
+        },
+        "rule_id": "SOC2-BRIDGE-GAP"
+      },
+      {
+        "finding_id": "F-002",
+        "title": "Critical subservice organization carved out of SOC 2 scope",
+        "severity": "low",
+        "confidence": "high",
+        "csf_function": "GV",
+        "csf_category": "GV.SC",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-001",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 1, Subservice organizations; Section 3.2, Infrastructure",
+            "excerpt": "Nimbus Cloud Services is carved out of scope: Infrastructure hosting; production workloads run in Nimbus Cloud Services.."
+          }
+        ],
+        "deal_impact": "Nimbus Cloud Services (Infrastructure hosting; production workloads run in Nimbus Cloud Services.) is carved out of scope and is critical to production or in-scope data.",
+        "remediation": {
+          "summary": "Obtain the Nimbus Cloud Services SOC report and assess carve-out risk.",
+          "cost_low_usd": 0,
+          "cost_high_usd": 5000,
+          "effort_weeks": 2
+        },
+        "rule_id": "SOC2-CARVE-OUT-CRITICAL"
+      }
+    ],
+    "dropped_unquoted": [
+      {
+        "type": "exception",
+        "ref": "CC6.1-01"
+      },
+      {
+        "type": "exception",
+        "ref": "CC6.2-01"
+      },
+      {
+        "type": "exception",
+        "ref": "CC7.2-01"
+      },
+      {
+        "type": "exception",
+        "ref": "CC8.1-01"
+      },
+      {
+        "type": "notable_observation",
+        "ref": "#3"
+      },
+      {
+        "type": "opinion",
+        "ref": "opinion"
+      }
+    ],
+    "dropped_no_locator": [],
+    "usage": {
+      "prompt_tokens": 1807,
+      "completion_tokens": 3504,
+      "cached_tokens": 0
+    },
+    "estimated_cost_usd": 0.077308
+  }
+}

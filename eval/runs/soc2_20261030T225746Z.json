@@ -1,0 +1,440 @@
+{
+  "created_at": "20261030T225746Z",
+  "as_of": "2026-10-30",
+  "result": {
+    "doc_id": "doc_brightwatersoc2type2",
+    "filename": "brightwater_soc2_type2.md",
+    "sha256": "d48efc43cbc8ad5626a1ea65572681be201490b68183e165d9e6870d8dcdf59c",
+    "opinion_quote": "In our opinion, in all material respects, the description presents the system as designed and implemented, and the controls stated in the description were suitably designed and operated effectively throughout the period, except for the deviations described in Section 4, which did not, in our judgment, rise to a level that would modify our opinion.",
+    "opinion_verified": true,
+    "soc2_analysis": {
+      "doc_id": "doc_brightwatersoc2type2",
+      "report_type": "type2",
+      "period_start": "2025-04-01",
+      "period_end": "2026-03-31",
+      "auditor": "Halvorsen & Pike LLP",
+      "opinion": "unqualified",
+      "trust_services_categories": [
+        "security",
+        "availability"
+      ],
+      "exceptions": [
+        {
+          "control_id": "CC6.1",
+          "description": "Exception noted. 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy.",
+          "deviations": 4,
+          "sample_size": 25,
+          "locator": "Section 4, CC6.1-01",
+          "management_response": "Management disabled the legacy provisioning script in April 2026 and has begun migrating service-desk accounts to the standard conditional access policy.",
+          "finding_id": "F-001"
+        },
+        {
+          "control_id": "CC6.2",
+          "description": "Exception noted. 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively.",
+          "deviations": 3,
+          "sample_size": 15,
+          "locator": "Section 4, CC6.2-01",
+          "management_response": "Management is evaluating an automated HR-to-IdP de-provisioning integration. Until then, terminations are processed manually by IT upon email notification from HR.",
+          "finding_id": "F-002"
+        },
+        {
+          "control_id": "CC7.2",
+          "description": "Exception noted. For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed.",
+          "deviations": null,
+          "sample_size": 30,
+          "locator": "Section 4, CC7.2-01",
+          "management_response": "The distribution list was corrected on November 24, 2025. Management has added a weekly check that alert routing is functioning.",
+          "finding_id": "F-003"
+        },
+        {
+          "control_id": "CC8.1",
+          "description": "Exception noted. 2 of 40 changes lacked documented approval (emergency hotfixes).",
+          "deviations": 2,
+          "sample_size": 40,
+          "locator": "Section 4, CC8.1-01",
+          "management_response": "Management has updated the emergency change procedure to require post-deployment approval within 48 hours.",
+          "finding_id": "F-004"
+        }
+      ],
+      "subservice_orgs": [
+        {
+          "name": "Nimbus Cloud Services",
+          "method": "carve_out",
+          "services": "infrastructure hosting",
+          "critical": true
+        },
+        {
+          "name": "LedgerPay Payroll",
+          "method": "carve_out",
+          "services": "HR and payroll processing, including employee termination records",
+          "critical": false
+        }
+      ],
+      "cuecs": [
+        "Provisioning and de-provisioning their own users' access to the Brightwater platform.",
+        "Enabling SSO/MFA for their users through the customer administration console.",
+        "Reviewing user access to the platform at least quarterly.",
+        "Notifying Brightwater promptly of suspected security incidents involving their accounts.",
+        "Securing API credentials issued to them."
+      ],
+      "bridge_gap_days": 213
+    },
+    "notable_observations": [
+      {
+        "locator": "Section 4, CC4.1-01",
+        "quote": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control.",
+        "text": "Penetration test noted 2 high-severity findings in a control row with no exceptions noted, and remediation status was outside scope."
+      },
+      {
+        "locator": "Section 5 \u2014 Other Information Provided by Management (unaudited)",
+        "quote": "Management plans to obtain a bridge letter covering April 1, 2026 forward upon request.",
+        "text": "Unaudited management statement states a bridge letter is only planned upon request; no bridge letter covering the period after 2026-03-31 through the assessment date 2026-10-30 is provided."
+      },
+      {
+        "locator": "Section 1, Subservice organizations",
+        "quote": "Our examination did not extend to controls of the subservice organizations.",
+        "text": "Scope limit: examination did not extend to subservice organization controls under the carve-out method."
+      },
+      {
+        "locator": "Section 1, Complementary user entity controls",
+        "quote": "Our examination did not extend to such complementary user entity controls.",
+        "text": "Scope limit: examination did not extend to complementary user entity controls."
+      }
+    ],
+    "signals": {
+      "exceptions": [
+        {
+          "control_id": "CC6.1",
+          "control_ref": "CC6.1-01"
+        },
+        {
+          "control_id": "CC6.2",
+          "control_ref": "CC6.2-01"
+        },
+        {
+          "control_id": "CC7.2",
+          "control_ref": "CC7.2-01"
+        },
+        {
+          "control_id": "CC8.1",
+          "control_ref": "CC8.1-01"
+        }
+      ],
+      "subservice_orgs": [
+        {
+          "name": "Nimbus Cloud Services",
+          "method": "carve_out",
+          "critical": true
+        },
+        {
+          "name": "LedgerPay Payroll",
+          "method": "carve_out",
+          "critical": false
+        }
+      ],
+      "bridge_gap_days": 213
+    },
+    "evidence_pool": [
+      {
+        "evidence_id": "E-001",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, CC6.1-01",
+        "excerpt": "Exception noted. 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy."
+      },
+      {
+        "evidence_id": "E-002",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, CC6.2-01",
+        "excerpt": "Exception noted. 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively."
+      },
+      {
+        "evidence_id": "E-003",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, CC7.2-01",
+        "excerpt": "Exception noted. For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed."
+      },
+      {
+        "evidence_id": "E-004",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, CC8.1-01",
+        "excerpt": "Exception noted. 2 of 40 changes lacked documented approval (emergency hotfixes)."
+      },
+      {
+        "evidence_id": "E-005",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Subservice organizations; Section 3.2",
+        "excerpt": "Nimbus Cloud Services is carved out of scope: infrastructure hosting."
+      },
+      {
+        "evidence_id": "E-006",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Subservice organizations",
+        "excerpt": "LedgerPay Payroll is carved out of scope: HR and payroll processing, including employee termination records."
+      },
+      {
+        "evidence_id": "E-007",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, CUEC 1",
+        "excerpt": "Provisioning and de-provisioning their own users' access to the Brightwater platform."
+      },
+      {
+        "evidence_id": "E-008",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, CUEC 2",
+        "excerpt": "Enabling SSO/MFA for their users through the customer administration console."
+      },
+      {
+        "evidence_id": "E-009",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, CUEC 3",
+        "excerpt": "Reviewing user access to the platform at least quarterly."
+      },
+      {
+        "evidence_id": "E-010",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, CUEC 4",
+        "excerpt": "Notifying Brightwater promptly of suspected security incidents involving their accounts."
+      },
+      {
+        "evidence_id": "E-011",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 3.5, CUEC 5",
+        "excerpt": "Securing API credentials issued to them."
+      },
+      {
+        "evidence_id": "E-012",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 4, CC4.1-01",
+        "excerpt": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control."
+      },
+      {
+        "evidence_id": "E-013",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 5 \u2014 Other Information Provided by Management (unaudited)",
+        "excerpt": "Management plans to obtain a bridge letter covering April 1, 2026 forward upon request."
+      },
+      {
+        "evidence_id": "E-014",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Subservice organizations",
+        "excerpt": "Our examination did not extend to controls of the subservice organizations."
+      },
+      {
+        "evidence_id": "E-015",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "Section 1, Complementary user entity controls",
+        "excerpt": "Our examination did not extend to such complementary user entity controls."
+      },
+      {
+        "evidence_id": "E-016",
+        "source_type": "document",
+        "collection_method": "document_upload",
+        "collector": "soc2_analyzer",
+        "locator": "brightwater_soc2_type2.md (report period)",
+        "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30."
+      }
+    ],
+    "findings": [
+      {
+        "finding_id": "F-001",
+        "title": "SOC 2 exception in logical access controls",
+        "severity": "high",
+        "confidence": "high",
+        "csf_function": "PR",
+        "csf_category": "PR.AA",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-001",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 4, CC6.1-01",
+            "excerpt": "Exception noted. 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy."
+          }
+        ],
+        "deal_impact": "4 of 25 sampled admin accounts were not enforced for MFA.",
+        "remediation": {
+          "summary": "Remediate CC6.1 exception: Exception noted. 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy.",
+          "cost_low_usd": 20000,
+          "cost_high_usd": 80000,
+          "effort_weeks": 10
+        },
+        "rule_id": "SOC2-EXCEPTION-ACCESS"
+      },
+      {
+        "finding_id": "F-002",
+        "title": "SOC 2 exception in logical access controls",
+        "severity": "high",
+        "confidence": "high",
+        "csf_function": "PR",
+        "csf_category": "PR.AA",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-002",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 4, CC6.2-01",
+            "excerpt": "Exception noted. 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively."
+          }
+        ],
+        "deal_impact": "3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively.",
+        "remediation": {
+          "summary": "Remediate CC6.2 exception: Exception noted. 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively.",
+          "cost_low_usd": 20000,
+          "cost_high_usd": 80000,
+          "effort_weeks": 10
+        },
+        "rule_id": "SOC2-EXCEPTION-ACCESS"
+      },
+      {
+        "finding_id": "F-003",
+        "title": "SOC 2 exception in security monitoring",
+        "severity": "high",
+        "confidence": "high",
+        "csf_function": "DE",
+        "csf_category": "DE.CM",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-003",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 4, CC7.2-01",
+            "excerpt": "Exception noted. For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed."
+          }
+        ],
+        "deal_impact": "For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed.",
+        "remediation": {
+          "summary": "Remediate CC7.2 exception: Exception noted. For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed.",
+          "cost_low_usd": 15000,
+          "cost_high_usd": 60000,
+          "effort_weeks": 6
+        },
+        "rule_id": "SOC2-EXCEPTION-MONITORING"
+      },
+      {
+        "finding_id": "F-004",
+        "title": "SOC 2 exception in change management",
+        "severity": "medium",
+        "confidence": "high",
+        "csf_function": "PR",
+        "csf_category": "PR.PS",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-004",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 4, CC8.1-01",
+            "excerpt": "Exception noted. 2 of 40 changes lacked documented approval (emergency hotfixes)."
+          }
+        ],
+        "deal_impact": "2 of 40 changes lacked documented approval (emergency hotfixes).",
+        "remediation": {
+          "summary": "Remediate CC8.1 exception: Exception noted. 2 of 40 changes lacked documented approval (emergency hotfixes).",
+          "cost_low_usd": 5000,
+          "cost_high_usd": 20000,
+          "effort_weeks": 4
+        },
+        "rule_id": "SOC2-EXCEPTION-CHANGE"
+      },
+      {
+        "finding_id": "F-005",
+        "title": "SOC 2 report period ended more than 90 days ago; no bridge letter provided",
+        "severity": "medium",
+        "confidence": "high",
+        "csf_function": "GV",
+        "csf_category": "GV.OV",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-016",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "brightwater_soc2_type2.md (report period)",
+            "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30."
+          }
+        ],
+        "deal_impact": "Report period ended 2026-03-31, 213 days before the assessment date; controls may have changed since.",
+        "remediation": {
+          "summary": "Obtain a bridge letter covering through 2026-10-30.",
+          "cost_low_usd": 2000,
+          "cost_high_usd": 10000,
+          "effort_weeks": 3
+        },
+        "rule_id": "SOC2-BRIDGE-GAP"
+      },
+      {
+        "finding_id": "F-006",
+        "title": "Critical subservice organization carved out of SOC 2 scope",
+        "severity": "low",
+        "confidence": "high",
+        "csf_function": "GV",
+        "csf_category": "GV.SC",
+        "source": "document",
+        "evidence": [
+          {
+            "evidence_id": "E-005",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "collector": "soc2_analyzer",
+            "locator": "Section 1, Subservice organizations; Section 3.2",
+            "excerpt": "Nimbus Cloud Services is carved out of scope: infrastructure hosting."
+          }
+        ],
+        "deal_impact": "Nimbus Cloud Services (infrastructure hosting) is carved out of scope and is critical to production or in-scope data.",
+        "remediation": {
+          "summary": "Obtain the Nimbus Cloud Services SOC report and assess carve-out risk.",
+          "cost_low_usd": 0,
+          "cost_high_usd": 5000,
+          "effort_weeks": 2
+        },
+        "rule_id": "SOC2-CARVE-OUT-CRITICAL"
+      }
+    ],
+    "dropped_unquoted": [],
+    "dropped_no_locator": [],
+    "usage": {
+      "prompt_tokens": 1833,
+      "completion_tokens": 2745,
+      "cached_tokens": 0
+    },
+    "estimated_cost_usd": 0.062232
+  }
+}

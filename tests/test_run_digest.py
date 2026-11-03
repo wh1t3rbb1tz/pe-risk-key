@@ -99,3 +99,30 @@ def test_print_catalog(capsys):
     assert "soc2_notables=1" in out
     script.print_catalog(None)
     assert capsys.readouterr().out == ""
+
+
+def test_print_narrative(capsys):
+    script = _load_script()
+    digest = {
+        "narrative": {
+            "executive_summary": "Rating C with a gap [F-001].",
+            "key_questions_for_management": [
+                "When is DMARC enforced [F-001]?"
+            ],
+        },
+        "deal_recommendations": [
+            {
+                "type": "closing_condition",
+                "text": "Require the fix.",
+                "basis_ids": ["F-001"],
+            }
+        ],
+    }
+    trace = [{"type": "narrative_complete", "valid": True}]
+    script.print_narrative(digest, trace)
+    out = capsys.readouterr().out
+    assert "Rating C with a gap" in out
+    assert "key questions (1):" in out
+    assert "When is DMARC enforced" in out
+    assert "[closing_condition] Require the fix. (basis: F-001)" in out
+    assert "narrative validation: valid=True" in out

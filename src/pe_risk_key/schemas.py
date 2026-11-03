@@ -47,6 +47,12 @@ def claim_type_enum() -> list[str]:
     return list(claim["properties"]["claim_type"]["enum"])
 
 
+def deal_recommendation_type_enum() -> list[str]:
+    """Allowed deal recommendation types from the digest schema."""
+    items = _load_root()["properties"]["deal_recommendations"]["items"]
+    return list(items["properties"]["type"]["enum"])
+
+
 def strip_nullable_optionals(obj: Any, def_name: str) -> Any:
     """Drop null-valued optional fields from strict-mode output.
 

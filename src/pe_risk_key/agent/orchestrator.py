@@ -38,6 +38,10 @@ from pe_risk_key.engine.crosscheck import (
     crosscheck_claims,
     merge_contradictions,
 )
+from pe_risk_key.engine.narrative import (
+    generate_narrative,
+    render_ic_memo,
+)
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.engine.scoring import score_digest
 from pe_risk_key.providers import (
@@ -391,6 +395,8 @@ def _assemble_digest(
     contradictions: list[dict[str, Any]] | None = None,
     interview_entry: dict[str, Any] | None = None,
     ran_crosscheck: bool = False,
+    narrative: dict[str, Any] | None = None,
+    deal_recommendations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -460,6 +466,13 @@ def _assemble_digest(
                     "model": WONDER_MODEL,
                 }
             )
+    providers.append(
+        {
+            "role": "narrative",
+            "provider": STANDARD_PROVIDER,
+            "model": WONDER_MODEL,
+        }
+    )
     digest = {
         "schema_version": "1.0.0",
         "digest_id": digest_id,
@@ -480,8 +493,12 @@ def _assemble_digest(
         "findings": findings,
         "contradictions": contradictions if contradictions is not None else [],
         "remediation_plan": scored["remediation_plan"],
-        "deal_recommendations": [],
-        "narrative": {"executive_summary": "Narrative pending."},
+        "deal_recommendations": deal_recommendations
+        if deal_recommendations is not None
+        else [],
+        "narrative": narrative
+        if narrative is not None
+        else {"executive_summary": "Narrative pending."},
         "limitations": scored["limitations"],
         "trace_ref": trace_path,
     }
@@ -516,8 +533,9 @@ def run_digest(
     Returns ``{digest_id, findings, collector_outputs, adjustments,
     trace_path, usage, catalog}`` and writes ``trace.jsonl``,
     ``collector_outputs.json``, ``findings.json``,
-    ``evidence_pool.json``, ``claims.json`` (interview runs), and
-    ``digest.json`` under ``eval/runs/<digest_id>/``.
+    ``evidence_pool.json``, ``claims.json`` (interview runs),
+    ``digest.json``, and ``ic_memo.md`` under ``eval/runs/<digest_id>/``.
+    The final step drafts the IC narrative from the scored digest.
     """
     alias_list = list(aliases or [])
     digest_id = new_digest_id()
@@ -834,6 +852,44 @@ def run_digest(
         overall=scored["overall"],
         function_scores=scored["function_scores"],
     )
+    soc2_summary = None
+    if soc2_analysis is not None:
+        soc2_summary = {
+            "opinion": soc2_analysis["opinion"],
+            "period_start": soc2_analysis["period_start"],
+            "period_end": soc2_analysis["period_end"],
+            "exception_count": len(soc2_analysis["exceptions"]),
+            "bridge_gap_days": soc2_analysis["bridge_gap_days"],
+        }
+    narrative_result = generate_narrative(
+        {
+            "target": {
+                "name": company_name,
+                "domain": domain,
+                "employee_band": employee_band,
+                "revenue_band": revenue_band,
+                "industry": industry,
+            },
+            "overall": scored["overall"],
+            "function_scores": scored["function_scores"],
+            "findings": merged,
+            "contradictions": contradictions,
+            "remediation_plan": scored["remediation_plan"],
+            "soc2_summary": soc2_summary,
+            "limitations": scored["limitations"],
+        }
+    )
+    if not narrative_result["valid"]:
+        scored["limitations"].append("narrative validation incomplete")
+        ctx.trace.event(
+            "narrative_validation_failed",
+            errors=narrative_result["validation_errors"],
+        )
+    ctx.trace.event(
+        "narrative_complete",
+        valid=narrative_result["valid"],
+        regenerated=narrative_result["regenerated"],
+    )
     digest = _assemble_digest(
         digest_id=digest_id,
         domain=domain,
@@ -852,10 +908,15 @@ def run_digest(
         contradictions=contradictions,
         interview_entry=interview_entry,
         ran_crosscheck=crosscheck_result is not None,
+        narrative=narrative_result["narrative"],
+        deal_recommendations=narrative_result["deal_recommendations"],
     )
     digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
     (run_dir / "digest.json").write_text(
         json.dumps(digest, indent=2), encoding="utf-8"
+    )
+    (run_dir / "ic_memo.md").write_text(
+        render_ic_memo(digest), encoding="utf-8"
     )
     ctx.trace.event(
         "digest_validated",
@@ -892,6 +953,10 @@ def run_digest(
             **crosscheck_result["usage"],
             "estimated_cost_usd": crosscheck_result["estimated_cost_usd"],
         }
+    components["narrative"] = {
+        **narrative_result["usage"],
+        "estimated_cost_usd": narrative_result["estimated_cost_usd"],
+    }
     usage = merge_usage_breakdown(components)
     ctx.trace.event("run_end", usage=usage)
     return {

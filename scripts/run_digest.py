@@ -175,6 +175,32 @@ def print_contradiction_recall(
         print("verdict accuracy: n/a (no matched claims)")
 
 
+def print_narrative(digest: dict, trace: list[dict]) -> None:
+    narrative = digest.get("narrative", {})
+    print(f"\nexecutive summary:\n  {narrative.get('executive_summary', '-')}")
+    questions = narrative.get("key_questions_for_management", [])
+    print(f"\nkey questions ({len(questions)}):")
+    if not questions:
+        print("  -")
+    for index, question in enumerate(questions, 1):
+        print(f"  {index}. {question}")
+    recs = digest.get("deal_recommendations", [])
+    print(f"\ndeal recommendations ({len(recs)}):")
+    if not recs:
+        print("  -")
+    for rec in recs:
+        print(
+            f"  [{rec.get('type')}] {rec.get('text')} "
+            f"(basis: {', '.join(rec.get('basis_ids', []))})"
+        )
+    complete = [e for e in trace if e["type"] == "narrative_complete"]
+    failed = [e for e in trace if e["type"] == "narrative_validation_failed"]
+    status = f"valid={complete[0]['valid']}" if complete else "missing"
+    if failed:
+        status += f", {len(failed[0].get('errors', []))} errors kept"
+    print(f"\nnarrative validation: {status}")
+
+
 def print_soc2_summary(digest: dict) -> None:
     analysis = digest.get("soc2_analysis")
     if analysis is None:
@@ -313,6 +339,8 @@ def main() -> int:
     print_contradiction_recall(
         digest["contradictions"], args.domain, questions
     )
+    print_narrative(digest, trace)
+    print(f"memo: {(run_dir / 'ic_memo.md').relative_to(ROOT)}")
     print(f"saved: {Path(result['trace_path']).parent.relative_to(ROOT)}/")
     return 0
 

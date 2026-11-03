@@ -19,6 +19,7 @@ import pe_risk_key.agent.orchestrator as orchestrator
 import pe_risk_key.analyzers.interview as interview_module
 import pe_risk_key.analyzers.soc2 as soc2_module
 import pe_risk_key.engine.crosscheck as crosscheck_module
+import pe_risk_key.engine.narrative as narrative_module
 from pe_risk_key.agent import run_digest
 from pe_risk_key.agent.prompts import system_prompt
 from pe_risk_key.collectors import incidents, kev, net, web_posture
@@ -87,12 +88,33 @@ class _FailingSearchClient:
         raise RuntimeError("no live model calls in agent tests")
 
 
+_CANNED_NARRATIVE = {
+    "narrative": {
+        "executive_summary": "Canned summary.",
+        "key_questions_for_management": [
+            f"Canned question {index}?" for index in range(5)
+        ],
+    },
+    "deal_recommendations": [],
+    "valid": True,
+    "validation_errors": [],
+    "regenerated": False,
+    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cached_tokens": 0},
+    "estimated_cost_usd": 0.00014,
+}
+
+
 @pytest.fixture
 def agent_env(monkeypatch, tmp_path):
     _ScriptedAgentClient.turns = []
     _ScriptedAgentClient.chats = []
     monkeypatch.setattr(orchestrator, "ModelClient", _ScriptedAgentClient)
     monkeypatch.setattr(orchestrator, "RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_narrative",
+        lambda payload, mode="standard": copy.deepcopy(_CANNED_NARRATIVE),
+    )
     monkeypatch.setattr(incidents, "CACHE_DIR", tmp_path / "icache")
     monkeypatch.setattr(incidents, "ModelClient", _FailingSearchClient)
     monkeypatch.delenv("DEMO_MODE", raising=False)
@@ -462,6 +484,11 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
             "provider": "meta_model_api",
             "model": "muse-spark-1.3",
         },
+        {
+            "role": "narrative",
+            "provider": "meta_model_api",
+            "model": "muse-wonder-1.0",
+        },
     ]
     assert digest["inputs"] == {
         "domain_scan": True,
@@ -471,7 +498,7 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
     assert [f["finding_id"] for f in digest["findings"]] == ["F-001", "F-002"]
     assert digest["contradictions"] == []
     assert digest["deal_recommendations"] == []
-    assert digest["narrative"] == {"executive_summary": "Narrative pending."}
+    assert digest["narrative"] == _CANNED_NARRATIVE["narrative"]
     assert digest["trace_ref"] == result["trace_path"]
     assert digest["overall"]["rating"] == "A"
     assert digest["overall"]["deal_signal"] == "proceed_with_conditions"
@@ -854,7 +881,12 @@ def test_soc2_digest_validates_and_confidence_medium(
         }
     ]
     roles = [p["role"] for p in digest["mode"]["providers"]]
-    assert roles == ["orchestrator", "public_records", "document_analysis"]
+    assert roles == [
+        "orchestrator",
+        "public_records",
+        "document_analysis",
+        "narrative",
+    ]
     assert digest["overall"]["confidence"] == "medium"
     assert "No SOC 2 report provided" not in digest["limitations"]
     assert "No management interview provided" in digest["limitations"]
@@ -895,11 +927,14 @@ def test_usage_breakdown_merges_orchestrator_and_soc2(
     assert set(usage["components"]) == {
         "orchestrator",
         "document_analysis",
+        "narrative",
     }
-    assert usage["prompt_tokens"] == 1200
-    assert usage["completion_tokens"] == 240
+    assert usage["prompt_tokens"] == 1210
+    assert usage["completion_tokens"] == 245
     assert usage["cached_tokens"] == 0
-    assert usage["estimated_cost_usd"] == pytest.approx(0.0016 + 0.008)
+    assert usage["estimated_cost_usd"] == pytest.approx(
+        0.0016 + 0.008 + 0.00014
+    )
     assert usage["components"]["orchestrator"][
         "estimated_cost_usd"
     ] == pytest.approx(0.0016)
@@ -937,8 +972,11 @@ def test_usage_breakdown_orchestrator_only_without_soc2(
         {"content": "Submitting.", "tool_calls": [_submit(_finding())]},
     ]
     result = run_digest(DOMAIN, "Acme", "201-1000", "50M-250M")
-    assert set(result["usage"]["components"]) == {"orchestrator"}
-    assert result["usage"]["prompt_tokens"] == 200
+    assert set(result["usage"]["components"]) == {
+        "orchestrator",
+        "narrative",
+    }
+    assert result["usage"]["prompt_tokens"] == 210
 
 
 def test_merge_usage_breakdown_with_transcription_entry():
@@ -1126,6 +1164,7 @@ def test_interview_digest_validates_with_contradictions(
         "transcription",
         "claim_extraction",
         "crosscheck",
+        "narrative",
     ]
     assert digest["overall"]["confidence"] == "medium"
     assert "No management interview provided" not in digest["limitations"]
@@ -1183,9 +1222,119 @@ def test_interview_usage_components(agent_env, monkeypatch, tmp_path):
         "transcription",
         "claim_extraction",
         "crosscheck",
+        "narrative",
     }
     assert components["transcription"]["audio_hours"] == round(
         65 / 3600, 6
     )
     assert components["claim_extraction"]["prompt_tokens"] == 500
     assert components["crosscheck"]["completion_tokens"] == 10
+
+
+class _ScriptedNarrativeClient:
+    outputs: list = []
+
+    def __init__(self, role, mode="standard", **kwargs):
+        assert role == "narrative", role
+        self.total_usage = {
+            "prompt_tokens": 200,
+            "completion_tokens": 50,
+            "cached_tokens": 0,
+        }
+
+    def chat_json(
+        self, messages, *, schema, schema_name, reasoning_effort=None
+    ):
+        return copy.deepcopy(type(self).outputs.pop(0))
+
+
+def _run_narrative_digest(agent_env, monkeypatch, outputs):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator, "generate_narrative", narrative_module.generate_narrative
+    )
+    _ScriptedNarrativeClient.outputs = outputs
+    monkeypatch.setattr(
+        narrative_module, "ModelClient", _ScriptedNarrativeClient
+    )
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {"content": "Submitting.", "tool_calls": [_submit(_finding())]},
+    ]
+    return run_digest(DOMAIN, "Acme", "201-1000", "50M-250M")
+
+
+def _narrative_output():
+    return {
+        "executive_summary": "Rating C with a gap [F-001].",
+        "key_questions_for_management": [
+            f"Question {index} about controls [F-001]?"
+            for index in range(5)
+        ],
+        "deal_recommendations": [
+            {
+                "type": "closing_condition",
+                "text": "Require the fix in days_31_60.",
+                "basis_ids": ["F-001"],
+            }
+        ],
+    }
+
+
+def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
+    result = _run_narrative_digest(
+        agent_env, monkeypatch, [_narrative_output()]
+    )
+    digest = _read_digest(result)
+    assert validate_digest(digest) == []
+    assert digest["narrative"]["executive_summary"].startswith("Rating C")
+    assert len(digest["narrative"]["key_questions_for_management"]) == 5
+    assert digest["deal_recommendations"][0]["type"] == "closing_condition"
+    assert "narrative" in [p["role"] for p in digest["mode"]["providers"]]
+    memo = (Path(result["trace_path"]).parent / "ic_memo.md").read_text(
+        encoding="utf-8"
+    )
+    assert "# IC Memo: Acme" in memo
+    assert "| F-001 |" in memo
+    assert "closing_condition" in memo
+    trace = _read_trace(result)
+    complete = [e for e in trace if e["type"] == "narrative_complete"]
+    assert len(complete) == 1
+    assert complete[0]["valid"] is True
+    assert not [e for e in trace if e["type"] == "narrative_validation_failed"]
+    assert "narrative validation incomplete" not in digest["limitations"]
+    assert result["usage"]["components"]["narrative"]["prompt_tokens"] == 200
+
+
+def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
+    bad = _narrative_output()
+    bad["executive_summary"] = "There is a major exposure."
+    bad["deal_recommendations"][0]["basis_ids"] = ["F-999"]
+    result = _run_narrative_digest(agent_env, monkeypatch, [bad, bad])
+    digest = _read_digest(result)
+    assert validate_digest(digest) == []
+    assert digest["deal_recommendations"] == []
+    assert "narrative validation incomplete" in digest["limitations"]
+    trace = _read_trace(result)
+    complete = [e for e in trace if e["type"] == "narrative_complete"]
+    assert complete[0]["valid"] is False
+    failed = [e for e in trace if e["type"] == "narrative_validation_failed"]
+    assert len(failed) == 1
+    assert any("exposure" in e or "F-999" in e for e in failed[0]["errors"])

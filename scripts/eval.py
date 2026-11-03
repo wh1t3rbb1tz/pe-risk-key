@@ -241,6 +241,11 @@ def _min(values: list[float | None]) -> float | None:
     return min(present) if present else None
 
 
+def _max(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
+
+
 def aggregate(scored: list[dict]) -> dict:
     """Mean/min per metric over successful runs, plus pass rates."""
     ok = [run for run in scored if run.get("status") == "ok"]
@@ -299,9 +304,11 @@ def aggregate(scored: list[dict]) -> dict:
             else None
         ),
         "score_mean": _mean(scores),
-        "score_variance": (
-            statistics.pvariance(scores) if len(scores) > 1 else 0.0
+        "score_std": (
+            statistics.pstdev(scores) if len(scores) > 1 else 0.0
         ),
+        "score_min": _min(scores),
+        "score_max": _max(scores),
         "determinism_fraction": (
             sum(1 for run in ok if run["deterministic_scoring"])
             / len(ok)
@@ -394,10 +401,16 @@ def render_markdown(
             f"- rating match fraction: {_pct(total['rating_match_fraction'])}",
             f"- profile match fraction: {_pct(total['profile_match_fraction'])}",
             f"- scoring determinism: {_pct(total['determinism_fraction'])} byte-identical",
-            f"- score variance: {_num(total['score_variance'], 2)}",
-            "",
         ]
     )
+    for name, plan in per_target.items():
+        agg = plan["aggregate"]
+        lines.append(
+            f"- {name} score: {_num(agg['score_mean'])}, "
+            f"std dev {_num(agg['score_std'])}, "
+            f"range {_num(agg['score_min'])}\u2013{_num(agg['score_max'])}"
+        )
+    lines.append("")
     return "\n".join(lines)
 
 

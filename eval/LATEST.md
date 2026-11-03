@@ -1,31 +1,32 @@
 # Eval results — 2026-11-03
 
-Models: muse-wonder-1.0 · Runs: 5 (brightwaterfleet.example x3, copperline.example x2) · Total cost: $1.7411
+Models: muse-wonder-1.0 · Runs: 5 (brightwaterfleet.example x3, copperline.example x2) · Total cost: $1.3541
 
 ## brightwaterfleet.example (outside-in + SOC 2 + interview)
 
 | run | finding recall | precision | contra recall | verdict acc | schema | narrative (att) | rating | profile | score | cost | time |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dg_tb9lwo1st8o7` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (2) | D (match) | match | 56.8 | $0.4855 | 83.9s |
-| `dg_3tp9o3lhhif7` | 100.0% | 100.0% | 100.0% | 100.0% | pass | FAIL (2) | D (match) | match | 57.3 | $0.4467 | 67.9s |
-| `dg_ea8uqhzdk6f5` | 100.0% | 93.8% | 100.0% | 100.0% | pass | FAIL (2) | D (match) | match | 55.5 | $0.4665 | 78.3s |
-| mean | 100.0% | 97.9% | 100.0% | 100.0% | | | | | 56.5 | | |
-| min | 100.0% | 93.8% | 100.0% | 100.0% | | | | | | | |
+| `dg_1lsuvteab6tk` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3850 | 48.9s |
+| `dg_co0cxi7wkexh` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3794 | 60.0s |
+| `dg_6f0pdq5c5kbz` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3872 | 65.7s |
+| mean | 100.0% | 100.0% | 100.0% | 100.0% | | | | | 56.8 | | |
+| min | 100.0% | 100.0% | 100.0% | 100.0% | | | | | | | |
 
 ## copperline.example (outside-in only)
 
 | run | finding recall | precision | contra recall | verdict acc | schema | narrative (att) | rating | profile | score | cost | time |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dg_o7wjrz52pwph` | 100.0% | 100.0% | n/a | n/a | pass | pass (2) | B (match) | match | 98.4 | $0.1768 | 47.4s |
-| `dg_otkdxvho44we` | 100.0% | 100.0% | n/a | n/a | pass | FAIL (2) | B (match) | match | 98.4 | $0.1656 | 53.4s |
+| `dg_qitmmzuiskgb` | 100.0% | 100.0% | n/a | n/a | pass | pass (1) | B (match) | match | 98.4 | $0.1006 | 27.7s |
+| `dg_xdi3nu467iqe` | 100.0% | 100.0% | n/a | n/a | pass | pass (1) | B (match) | match | 98.4 | $0.1020 | 31.1s |
 | mean | 100.0% | 100.0% | n/a | n/a | | | | | 98.4 | | |
 | min | 100.0% | 100.0% | n/a | n/a | | | | | | | |
 
 ## Aggregate
 
 - schema pass rate: 100.0%
-- narrative pass rate: 40.0%
+- narrative pass rate: 100.0%
 - rating match fraction: 100.0%
 - profile match fraction: 100.0%
 - scoring determinism: 100.0% byte-identical
-- score variance: 420.64
+- brightwaterfleet.example score: 56.8, std dev 0.0, range 56.8–56.8
+- copperline.example score: 98.4, std dev 0.0, range 98.4–98.4

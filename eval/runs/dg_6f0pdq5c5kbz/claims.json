@@ -1,0 +1,85 @@
+{
+  "claims": [
+    {
+      "claim_index": 0,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 1,
+      "timestamp": "00:11",
+      "text": "Every admin account is behind MFA. No exceptions. That's been true for years. It's enforced through our conditional access policy.",
+      "claim_type": "control_coverage",
+      "context_question": "Thanks for making time, Dana. We'll keep this to the security basics so the deal team has a clean picture. Let's start with identity. How is admin access protected?"
+    },
+    {
+      "claim_index": 1,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 3,
+      "timestamp": "00:22",
+      "text": "Offboarding is automated. HR flags the termination and access is revoked same day through our identity provider.",
+      "claim_type": "control_coverage",
+      "context_question": "And when someone leaves the company?"
+    },
+    {
+      "claim_index": 2,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 5,
+      "timestamp": "00:33",
+      "text": "We have a 24 7 SOC through our MSSP, every alert gets looked at, nothing sits.",
+      "claim_type": "control_coverage",
+      "context_question": "Talk to me about monitoring."
+    },
+    {
+      "claim_index": 3,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 7,
+      "timestamp": "00:48",
+      "text": "We're fully locked down there. DMARC is enforced. Nobody can spoof our domain.",
+      "claim_type": "control_exists",
+      "context_question": "Email is a big one for us. Our Our portfolio companies get hit with wire fraud attempts constantly. Where are you on spoofing protection?"
+    },
+    {
+      "claim_index": 4,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 9,
+      "timestamp": "00:58",
+      "text": "No, nothing material. We've never had a breach.",
+      "claim_type": "incident_history",
+      "context_question": "Any security incidents in the last few few years?"
+    },
+    {
+      "claim_index": 5,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 11,
+      "timestamp": "01:08",
+      "text": "We decommissioned the legacy stuff a while back. Everything external goes through the main app and the VPN.",
+      "claim_type": "control_coverage",
+      "context_question": "What about your external attack surface? Legacy systems, old infrastructure?"
+    },
+    {
+      "claim_index": 6,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 13,
+      "timestamp": "01:16",
+      "text": "Annual third party test. The last one came back clean. No highs.",
+      "claim_type": "third_party_assurance",
+      "context_question": "Pen testing?"
+    },
+    {
+      "claim_index": 7,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 15,
+      "timestamp": "01:24",
+      "text": "Daily backups to immutable storage in a second region and we do a restore test every quarter.",
+      "claim_type": "control_coverage",
+      "context_question": "Backups and recovery?"
+    },
+    {
+      "claim_index": 8,
+      "speaker": "Dana Reyes (CTO)",
+      "turn_index": 17,
+      "timestamp": "01:35",
+      "text": "We can get one. one we haven't needed it so far.",
+      "claim_type": "third_party_assurance",
+      "context_question": "Last one, do you have a bridge letter for the period since your SOC 2 ended?"
+    }
+  ]
+}

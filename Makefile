@@ -1,5 +1,5 @@
 # PE Risk Key
-.PHONY: setup test demo serve eval fresh-demo mcp
+.PHONY: setup test demo serve eval fresh-demo mcp readme
 
 setup:
 	uv sync
@@ -37,3 +37,6 @@ fresh-demo:
 
 mcp:
 	.venv/bin/python -m pe_risk_key.mcp_server
+
+readme:
+	.venv/bin/python scripts/update_readme_results.py

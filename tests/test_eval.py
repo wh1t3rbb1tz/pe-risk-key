@@ -167,7 +167,10 @@ def test_aggregate_mean_min_and_rates():
     assert agg["narrative_pass_rate"] == 0.5
     assert agg["rating_match_fraction"] == 0.5
     assert agg["score_mean"] == 75.0
-    assert agg["score_variance"] == 25.0
+    assert agg["score_std"] == 5.0
+    assert agg["score_min"] == 70.0
+    assert agg["score_max"] == 80.0
+    assert "score_variance" not in agg
     assert agg["determinism_fraction"] == 1.0
     assert agg["total_cost_usd"] == 4.0
 
@@ -226,3 +229,33 @@ def test_render_markdown_has_tables():
     assert "| run | finding recall |" in markdown
     assert "`dg_abc`" in markdown
     assert "## Aggregate" in markdown
+    assert "score variance" not in markdown
+
+
+def test_render_markdown_reports_per_target_score_spread():
+    script = _load_script()
+    scored = _scored("dg_abc", 1.0, 1.0, 1.0, 1.0, score=56.8)
+    scored["narrative_attempts"] = 1
+    scored["wall_seconds"] = 60.0
+    scored["profile"].update({"rating_got": "D", "rating_want": "D"})
+    per_target = {
+        "brightwaterfleet.example": {
+            "run_count": 1,
+            "label": "outside-in + SOC 2 + interview",
+            "runs": [scored],
+            "aggregate": script.aggregate([scored]),
+        }
+    }
+    results = {
+        "date": "2026-11-03",
+        "models": ["muse-wonder-1.0"],
+        "total_runs": 1,
+        "targets": {},
+        "aggregate": script.aggregate([scored]),
+        "total_cost_usd": 1.0,
+    }
+    markdown = script.render_markdown(results, per_target)
+    assert (
+        "- brightwaterfleet.example score: 56.8, std dev 0.0, "
+        "range 56.8\u201356.8" in markdown
+    )

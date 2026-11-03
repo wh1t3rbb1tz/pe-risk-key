@@ -1,96 +1,218 @@
 # PE Risk Key
 
-PE-native IT and cybersecurity risk digest, built on Meta Muse models for the
-**Meta Global AI Developer Hackathon** (Indie track, theme: Build for Your World).
+Evidence-cited cyber risk digests for private equity, in minutes, built on Meta Muse.
 
-> **Provenance:** This repository was created and built during the hackathon
-> building period, **Oct 27 – Nov 4, 2026**. No code predates the event.
-> Planning specs in this first commit were drafted with AI assistance; all
-> application code is written during the event with Muse Code.
+## The problem
 
-## Repo layout (initial)
+Cyber diligence for a deal usually means a management questionnaire, a SOC 2
+PDF nobody re-verifies, and outside-in findings nobody can trace to evidence.
+The deal team signs on a summary while the underlying claims go unchecked.
+PE Risk Key produces a risk digest where every finding cites its evidence and
+every management claim gets a verdict.
 
-| Path | Purpose |
-|---|---|
-| `SPEC.md` | Build specification: scope, safety boundary, architecture, interfaces, day plan |
-| `digest.schema.json` | JSON Schema for the digest — the product contract for API, MCP, and UI |
-| `scoring.yaml` | Deterministic scoring rules, weights, caps, and cost bands |
-| `fixtures/outside_in/` | Synthetic passive-collector output for fictional `.example` targets |
-| `fixtures/documents/` | Synthetic SOC 2 Type II report |
-| `fixtures/interviews/` | Script for the synthetic management interview recording |
-| `fixtures/expected/` | Expected findings and contradictions for the eval harness |
+## What it does
 
-## Safety
+- **Management claims vs. evidence:** cross-checks interview claims against
+  collected evidence — contradicted / unsupported / supported — with excerpts
+  and locators.
+- **Passive outside-in collection:** email auth, DNSSEC, certificate
+  transparency, web posture, CISA KEV, and public incidents. No scanning,
+  no logins.
+- **SOC 2 analysis:** extracts exceptions, tested controls, carve-outs,
+  CUECs, and the bridge gap; every quote is verified against the report.
+- **Deterministic scoring:** NIST CSF function scores, rating caps, deal
+  signal, 100-day plan, and costs. Same inputs, byte-identical output.
+- **Delivery:** an IC memo (markdown export), a live dashboard, and
+  read-only MCP tools for an associate's AI assistant.
 
-PE Risk Key is passive by design: DNS, certificate transparency, a single
-standard HTTPS GET, public records, and documents the user provides. No
-scanning, probing, or authentication attempts. Up to two handshake-only TLS
-probes per host (TLSv1.0, TLSv1.1) detect deprecated protocol support; no
-application data is sent. All demo targets are fictional companies on the
-reserved `.example` TLD. See `SPEC.md` §2.
+## Screenshots
 
-### How safety is enforced
+<!-- Screenshots are captured from the dashboard and added before submission. -->
+![PE Risk Key dashboard](docs/screenshots/dashboard.png)
+![Claims vs evidence cards](docs/screenshots/claims.png)
 
-- `src/pe_risk_key/collectors/net.py` is the only module that may make
-  target HTTP/TLS requests; a static test fails if any other collector
-  file imports socket, requests, httpx, or urllib.
-- `safe_get` enforces GET-only requests to allowlisted hosts, never
-  follows redirects, and caps requests per host per run.
-- `search_public_incidents` keeps only cited results and drops
-  denylisted sources (`PROHIBITED_SOURCE_PATTERNS` in
-  `collectors/incidents.py`): no paste-site, breach-dump, or
-  credential-lookup content ever enters a digest.
+## Meta models
 
-## Status
+| Component | Model | Why |
+|---|---|---|
+| Orchestrator agent | `muse-wonder-1.0` | tool planning with parallel collector calls |
+| SOC 2 extraction | `muse-wonder-1.0` | long-document structured extraction |
+| Interview transcription | `muse-voice-transcribe-1.0` | speech-to-text with diarization |
+| Public records | `muse-spark-1.3` | search grounding with citations |
+| Claim cross-check | `muse-wonder-1.0` | claim extraction plus verdicts over the evidence catalog |
+| IC narrative | `muse-wonder-1.0` | memo prose written into code-owned slots |
+| Development | Muse Code | agentic coding CLI used to build the repo |
 
-Working today (Oct 28): Meta Model API provider with role routing and
-retries; six passive collectors (email auth, DNSSEC, CT, web posture,
-KEV, public incidents); Wonder orchestrator agent with parallel tool
-calls, coverage check, and JSONL trace; deterministic rule engine,
-scoring, and schema-validated digest assembly. Next: SOC 2 analyzer,
-interview pipeline, cross-check, narrative, dashboard, API.
+## Architecture
 
-Demo (collectors from fixtures, model calls live; needs `MODEL_API_KEY`
-in `.env`):
+Model steps are labeled `model`; everything else is deterministic code.
 
-```sh
-.venv/bin/python scripts/run_digest.py --demo \
-  --domain brightwaterfleet.example \
-  --company "Brightwater Fleet Systems, Inc." \
-  --employee-band 201-1000 --revenue-band 50M-250M
+```mermaid
+flowchart TD
+    T[Target domain] --> C[Outside-in collectors<br/>DNS · CT · HTTPS · KEV — code]
+    T --> P[Public incidents<br/>Muse Spark + citation check — model + code]
+    S[SOC 2 report] --> E[SOC 2 extraction<br/>Muse Wonder + quote check — model + code]
+    I[Interview audio] --> V[Transcription<br/>Muse Voice — model]
+    C --> O[Orchestrator<br/>Muse Wonder — model]
+    P --> O
+    O --> F[Submitted findings]
+    F --> R[Rules + scoring — code]
+    E --> R
+    V --> X[Claims + cross-check<br/>Muse Wonder — model]
+    F --> X
+    E --> X
+    R --> N[IC narrative<br/>Muse Wonder into code slots — model + code]
+    X --> N
+    N --> D[Digest · memo · dashboard · MCP]
 ```
 
-## MCP server
+## Why trust it
 
-`src/pe_risk_key/mcp_server.py` exposes saved digests over MCP (stdio)
-for a PE associate’s AI assistant. It is read-only: it reads
-`eval/runs/*/digest.json` and never triggers new runs or network calls.
+- **Verbatim-quote verification:** every extracted SOC 2 and claim quote must
+  appear in its source after normalization; failures are dropped with a trace.
+- **Numeric grounding:** deviation counts appear only if stated in the
+  report; narrative numbers must come from scored input.
+- **SOC 2 classification check:** "exceptions" whose result text says no
+  exceptions noted are reclassified, not reported.
+- **Code-owned citations and recommendation slots:** the model writes plain
+  prose; code attaches `[F-xxx]`/`[C-xxx]` chips and fills recommendation
+  slots from the trigger table.
+- **Deterministic scoring and caps:** pure functions over findings; the eval
+  re-scores twice and checks byte-identical JSON.
+- **Coverage cap:** outside-in data alone caps the rating at B and conditions
+  the deal signal — no A without documents and an interview.
+- **Self-contained digests:** every cited id resolves to findings' evidence
+  or `supporting_evidence`; one validator is used everywhere.
+- **Safety boundary:** `net.py` is the only network chokepoint (a static
+  test fails otherwise); uploads are checked by size, extension, and
+  content; the API binds localhost only unless explicitly allowed.
 
-Tools: `list_digests` (finished runs, newest first), `get_risk_digest`
-(latest run for a domain or digest id: rating, decision, top risks,
-contradictions, summary), `explain_finding` (evidence, remediation,
-citing claims), and `compare_targets` (2–3 targets side by side with a
-deterministic relative-risk ranking; no model calls).
+## Results
 
-To use it, copy `scripts/mcp_config_example.json` into your MCP client
-config (Claude Desktop or any generic client), replacing the absolute
-paths with your checkout. Test the server directly with:
+<!-- EVAL:START -->
+Models: muse-wonder-1.0 · Runs: 5 (brightwaterfleet.example x3, copperline.example x2) · Total cost: $1.3541
+
+## brightwaterfleet.example (outside-in + SOC 2 + interview)
+
+| run | finding recall | precision | contra recall | verdict acc | schema | narrative (att) | rating | profile | score | cost | time |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `dg_1lsuvteab6tk` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3850 | 48.9s |
+| `dg_co0cxi7wkexh` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3794 | 60.0s |
+| `dg_6f0pdq5c5kbz` | 100.0% | 100.0% | 100.0% | 100.0% | pass | pass (1) | D (match) | match | 56.8 | $0.3872 | 65.7s |
+| mean | 100.0% | 100.0% | 100.0% | 100.0% | | | | | 56.8 | | |
+| min | 100.0% | 100.0% | 100.0% | 100.0% | | | | | | | |
+
+## copperline.example (outside-in only)
+
+| run | finding recall | precision | contra recall | verdict acc | schema | narrative (att) | rating | profile | score | cost | time |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `dg_qitmmzuiskgb` | 100.0% | 100.0% | n/a | n/a | pass | pass (1) | B (match) | match | 98.4 | $0.1006 | 27.7s |
+| `dg_xdi3nu467iqe` | 100.0% | 100.0% | n/a | n/a | pass | pass (1) | B (match) | match | 98.4 | $0.1020 | 31.1s |
+| mean | 100.0% | 100.0% | n/a | n/a | | | | | 98.4 | | |
+| min | 100.0% | 100.0% | n/a | n/a | | | | | | | |
+
+## Aggregate
+
+- schema pass rate: 100.0%
+- narrative pass rate: 100.0%
+- rating match fraction: 100.0%
+- profile match fraction: 100.0%
+- scoring determinism: 100.0% byte-identical
+- brightwaterfleet.example score: 56.8, std dev 0.0, range 56.8–56.8
+- copperline.example score: 98.4, std dev 0.0, range 98.4–98.4
+<!-- EVAL:END -->
+
+Regenerated with `make readme` from `eval/LATEST.md`.
+
+## Cost and speed
+
+<!-- COST:START -->
+Mean $0.27 per run and 47s wall time across 5 runs (2026-11-03 eval).
+<!-- COST:END -->
+
+## Quickstart
 
 ```sh
-.venv/bin/python -m pe_risk_key.mcp_server
+make setup            # uv sync
+cp .env.example .env  # set MODEL_API_KEY (https://dev.meta.ai)
+make demo             # full Brightwater run: fixture collectors, live models
+make serve            # dashboard at http://127.0.0.1:8000
+make fresh-demo       # clear model caches, then serve
 ```
 
-which speaks MCP over stdio.
+`.env` keys (all documented in `.env.example`): `MODEL_API_KEY`
+(required), `MODEL_TIMEOUT_SECONDS` (default 300),
+`PUBLIC_RECORDS_MAX_INPUT_TOKENS` (default 250000),
+`PE_RISK_KEY_MODE` (`standard`; `confidential` is a stub),
+`BASETEN_API_KEY` (reserved for confidential mode), `DEMO_MODE`,
+`PE_RISK_KEY_RUNS_DIR`, `PE_RISK_KEY_ALLOW_REMOTE`.
 
-## Known limitations
+## MCP
 
-- KEV matches are product-level (no version-range check);
-- public-incident search results vary run to run, and the parent/brand
-  entity must be supplied via aliases;
-- TLS 1.2 support isn’t probed;
-- CT log presence doesn’t confirm live hosts;
-- cost bands are triage estimates;
+Read-only MCP server over stdio (`src/pe_risk_key/mcp_server.py`): reads
+saved digests, never triggers runs or network calls. Tools: `list_digests`,
+`get_risk_digest`, `explain_finding`, `compare_targets` (deterministic,
+no model calls).
+
+Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "pe-risk-key": {
+      "command": "uv",
+      "args": [
+        "--directory", "/path/to/pe-risk-key",
+        "run", "python", "-m", "pe_risk_key.mcp_server"
+      ]
+    }
+  }
+}
+```
+
+Then ask: "Compare Brightwater and Copperline for cyber risk before IC."
+
+## Safety and scope
+
+- Passive only: DNS queries, certificate-transparency logs, one HTTPS GET
+  per host, two handshake-only TLS probes, search-grounded public records,
+  and user-uploaded documents. No scanning, vulnerability probing, or
+  authentication attempts. See `SPEC.md` §2.
+- Demo targets are fictional companies on reserved `.example` domains.
+- Live (non-demo) runs show a confirmation note before passive collection
+  contacts the target's DNS and apex/www hosts.
+
+## Limitations
+
+- KEV matches are product-level (no version-range check).
+- Public-incident search results vary run to run, and the parent/brand
+  entity must be supplied via aliases.
+- TLS 1.2 support isn't probed.
+- CT log presence doesn't confirm live hosts.
+- Cost bands are triage estimates.
 - DMARC/SPF/DNSSEC reflect the moment of collection.
+- Demo fixtures are synthetic: fictional companies, SOC 2 report, and
+  interview recording.
+
+## Roadmap
+
+- Confidential mode: open-weight Muse Spark Open inference on a private
+  endpoint for sensitive targets (stubbed in `providers.py`, SPEC §3).
+- KEV version-range checks via NVD data.
+- More document types: pen test reports, security questionnaires.
+- Portfolio monitoring across targets over time.
+
+## Provenance
+
+Built Oct 27 – Nov 4, 2026 for the Meta Global AI Developer Hackathon
+(Indie track). No code predates the event:
+[commit history](https://github.com/wh1t3rbb1tz/pe-risk-key/commits/main)
+and checkpoint tags
+[checkpoint-oct28](https://github.com/wh1t3rbb1tz/pe-risk-key/tree/checkpoint-oct28),
+[checkpoint-nov02](https://github.com/wh1t3rbb1tz/pe-risk-key/tree/checkpoint-nov02),
+[checkpoint-nov02-night](https://github.com/wh1t3rbb1tz/pe-risk-key/tree/checkpoint-nov02-night).
+Planning specs were drafted with AI assistance; all application code was
+written during the event with Muse Code.
 
 ## License
 

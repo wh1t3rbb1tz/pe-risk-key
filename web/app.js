@@ -76,6 +76,14 @@ const STAGE_LABELS = {
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 const VERDICT_RANK = { contradicted: 0, unsupported: 1, supported: 2 };
 const CONTROL_RE = /\b((?:CC|A|C|PI|P)\d+\.\d+)\b/;
+const EVIDENCE_KIND_LABELS = {
+  exception: "SOC 2 exception",
+  no_exception: "SOC 2 control tested — no exceptions",
+  carve_out: "SOC 2 carve-out",
+  cuec: "SOC 2 CUEC",
+  notable: "SOC 2 observation",
+  bridge: "SOC 2 report period",
+};
 const CITE_RE = /\[((?:F|C)-\d{3})\]/g;
 
 const $ = (id) => document.getElementById(id);
@@ -1067,8 +1075,8 @@ function verdictBadge(verdict) {
 }
 
 function evidenceChip(evidence) {
-  let label = METHOD_LABELS[evidence.collection_method] || evidence.collector || "Evidence";
-  if (evidence.collection_method === "document_upload" && evidence.locator) {
+  let label = EVIDENCE_KIND_LABELS[evidence.evidence_kind] || METHOD_LABELS[evidence.collection_method] || evidence.collector || "Evidence";
+  if (!evidence.evidence_kind && evidence.collection_method === "document_upload" && evidence.locator) {
     const match = CONTROL_RE.exec(evidence.locator);
     if (match) label += " " + match[1];
   }

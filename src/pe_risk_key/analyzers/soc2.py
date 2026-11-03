@@ -26,7 +26,7 @@ from pypdf import PdfReader
 from pe_risk_key.analyzers.schemas import soc2_extraction_schema
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.providers import WONDER_USD_PER_MTOK, Mode, ModelClient
-from pe_risk_key.schemas import subschema
+from pe_risk_key.schemas import project_onto_subschema, subschema
 
 ROOT = Path(__file__).resolve().parents[3]
 SCORING_PATH = ROOT / "scoring.yaml"
@@ -75,6 +75,7 @@ class SOC2Result:
     findings: list[dict[str, Any]]
     dropped_unquoted: list[dict[str, Any]] = field(default_factory=list)
     dropped_no_locator: list[dict[str, Any]] = field(default_factory=list)
+    dropped_evidence_keys: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     estimated_cost_usd: float = 0.0
 
@@ -396,9 +397,10 @@ def analyze_soc2(
     rules = _rules_by_id(scoring)
 
     # Evidence pool (numbered first so findings can reference it).
-    # evidence_kind is pool-only metadata for the cross-check catalog;
-    # finding copies strip it since digest evidence is a closed schema.
+    # evidence_kind feeds both the cross-check catalog and digest-side
+    # labeling; finding copies project onto the schema properties.
     pool: list[dict] = []
+    dropped_evidence_keys: set[str] = set()
 
     def add_evidence(locator: str, excerpt: str, kind: str) -> dict:
         item = {
@@ -414,11 +416,11 @@ def analyze_soc2(
         return item
 
     def finding_evidence(item: dict) -> dict:
-        return {
-            key: value
-            for key, value in copy.deepcopy(item).items()
-            if key != "evidence_kind"
-        }
+        projected, keys = project_onto_subschema(
+            copy.deepcopy(item), "evidence"
+        )
+        dropped_evidence_keys.update(keys)
+        return projected
 
     exception_evidence = [
         add_evidence(item["locator"], item["quote"], "exception")
@@ -628,6 +630,7 @@ def analyze_soc2(
         findings=findings,
         dropped_unquoted=dropped_unquoted,
         dropped_no_locator=dropped_no_locator,
+        dropped_evidence_keys=sorted(dropped_evidence_keys),
         usage=usage,
         estimated_cost_usd=_analyze_cost_usd(usage),
     )

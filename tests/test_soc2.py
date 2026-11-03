@@ -14,7 +14,10 @@ from pypdf import PdfWriter
 
 import pe_risk_key.analyzers.soc2 as soc2_module
 from pe_risk_key.analyzers.soc2 import analyze_soc2
+from pe_risk_key.agent.orchestrator import supporting_evidence
 from pe_risk_key.schemas import subschema
+from pe_risk_key.validate import validate_digest
+from test_api import _complete_digest
 
 SOC_TEXT = """# Synthetic SOC 2 Type II Report
 
@@ -901,9 +904,13 @@ def test_evidence_pool_kinds(soc2_env, tmp_path):
         "exception",
         "no_exception",
     ]
+    pool_kind = {
+        item["evidence_id"]: item["evidence_kind"]
+        for item in result.evidence_pool
+    }
     for finding in result.findings:
         for item in finding["evidence"]:
-            assert "evidence_kind" not in item
+            assert item["evidence_kind"] == pool_kind[item["evidence_id"]]
 
 
 def test_fixture_bridge_notable_in_pool(soc2_env):
@@ -929,3 +936,68 @@ def test_fixture_bridge_notable_in_pool(soc2_env):
     assert len(notables) == 1
     assert notables[0]["locator"] == "Section 5"
     assert "bridge letter" in notables[0]["excerpt"]
+
+
+def _real_pool_result(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["controls_tested"] = FIXTURE_TESTED_ROWS
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_regress", AS_OF)
+    kinds = {item["evidence_kind"] for item in result.evidence_pool}
+    assert {"exception", "no_exception", "notable", "bridge"} <= kinds
+    return result
+
+
+def _citing_contradiction(evidence_id):
+    return {
+        "contradiction_id": "C-001",
+        "claim": {
+            "speaker": "Dana Reyes (CTO)",
+            "timestamp": "05:00",
+            "text": "Our controls operated effectively all year.",
+            "claim_type": "control_coverage",
+        },
+        "verdict": "supported",
+        "severity": "info",
+        "evidence_refs": [evidence_id],
+        "explanation": "Regression citation of a pool-only item.",
+    }
+
+
+def test_real_pool_supporting_evidence_validates(soc2_env):
+    result = _real_pool_result(soc2_env)
+    pool_only = next(
+        item
+        for item in result.evidence_pool
+        if item["evidence_kind"] == "notable"
+    )
+    digest = _complete_digest(
+        "dg_regress00001", "2026-10-30T00:00:00+00:00"
+    )
+    digest["contradictions"] = [
+        _citing_contradiction(pool_only["evidence_id"])
+    ]
+    copied, dropped = supporting_evidence(
+        [], digest["contradictions"], [], result.evidence_pool
+    )
+    assert dropped == []
+    digest["supporting_evidence"] = copied
+    assert validate_digest(digest) == []
+    assert copied[0]["evidence_id"] == pool_only["evidence_id"]
+    assert copied[0]["evidence_kind"] == "notable"
+
+
+def test_real_pool_finding_evidence_validates(soc2_env):
+    result = _real_pool_result(soc2_env)
+    assert result.dropped_evidence_keys == []
+    digest = _complete_digest(
+        "dg_regress00002", "2026-10-30T00:00:00+00:00"
+    )
+    digest["findings"] = result.findings
+    assert validate_digest(digest) == []
+    assert any(
+        "evidence_kind" in item
+        for finding in digest["findings"]
+        for item in finding["evidence"]
+    )

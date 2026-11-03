@@ -131,7 +131,12 @@ def test_original_and_strict_accept_their_shapes():
         **base,
         "rule_id": None,
         "evidence": [
-            {**base["evidence"][0], "collector": None, "collected_at": None}
+            {
+                **base["evidence"][0],
+                "collector": None,
+                "collected_at": None,
+                "evidence_kind": None,
+            }
         ],
     }
     jsonschema.Draft202012Validator(strict).validate(strict_instance)

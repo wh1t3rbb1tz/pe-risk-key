@@ -60,6 +60,7 @@ from pe_risk_key.providers import (
 )
 from pe_risk_key.validate import validate_digest
 from pe_risk_key.schemas import (
+    project_onto_subschema,
     strict_subschema,
     strip_nullable_optionals,
     subschema,
@@ -484,13 +485,15 @@ def supporting_evidence(
     contradictions: list[dict[str, Any]] | None,
     deal_recommendations: list[dict[str, Any]] | None,
     evidence_pool: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Pool items cited by contradictions/recs that no finding embeds.
 
-    Pool order is preserved so output is deterministic.
+    Pool order is preserved so output is deterministic. Items are
+    projected onto the evidence schema's properties. Returns the items
+    plus the sorted names of dropped internal keys.
     """
     if not evidence_pool:
-        return []
+        return [], []
     embedded: set[str] = set()
     for finding in findings:
         for item in finding.get("evidence", []) or []:
@@ -507,14 +510,19 @@ def supporting_evidence(
         for ref in rec.get("basis_ids", []) or []:
             if isinstance(ref, str) and ref.startswith("E-"):
                 wanted.add(ref)
-    return [
-        item
-        for item in evidence_pool
-        if isinstance(item, dict)
-        and isinstance(item.get("evidence_id"), str)
-        and item["evidence_id"] in wanted
-        and item["evidence_id"] not in embedded
-    ]
+    items: list[dict[str, Any]] = []
+    dropped: set[str] = set()
+    for item in evidence_pool:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("evidence_id"), str)
+            and item["evidence_id"] in wanted
+            and item["evidence_id"] not in embedded
+        ):
+            projected, keys = project_onto_subschema(item, "evidence")
+            items.append(projected)
+            dropped.update(keys)
+    return items, sorted(dropped)
 
 
 def _assemble_digest(
@@ -655,7 +663,7 @@ def _assemble_digest(
     }
     if soc2_analysis is not None:
         digest["soc2_analysis"] = soc2_analysis
-    digest["supporting_evidence"] = supporting_evidence(
+    digest["supporting_evidence"], _ = supporting_evidence(
         findings, contradictions, deal_recommendations, evidence_pool
     )
     return digest
@@ -1194,6 +1202,22 @@ def run_digest(
         narrative=narrative_result["narrative"],
         deal_recommendations=narrative_result["deal_recommendations"],
     )
+    dropped_fields: set[str] = set(
+        supporting_evidence(
+            merged,
+            contradictions,
+            narrative_result["deal_recommendations"],
+            evidence_pool,
+        )[1]
+    )
+    if soc2_result is not None:
+        dropped_fields.update(
+            getattr(soc2_result, "dropped_evidence_keys", []) or []
+        )
+    if dropped_fields:
+        ctx.trace.event(
+            "evidence_fields_dropped", keys=sorted(dropped_fields)
+        )
     digest_errors = validate_digest(digest)
     (run_dir / "digest.json").write_text(
         json.dumps(digest, indent=2), encoding="utf-8"

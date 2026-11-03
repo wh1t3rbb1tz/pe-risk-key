@@ -302,6 +302,41 @@ def test_explain_finding(runs_dir):
         explain_finding("dg_999999999999", "F-001")
 
 
+def test_explain_finding_kind_labels(runs_dir):
+    finding = _finding("F-001", "high", "E-010")
+    finding["evidence"][0]["evidence_kind"] = "exception"
+    digest = _digest(
+        "dg_000000000002",
+        "Acme",
+        "acme.example",
+        "2026-01-01T00:00:00+00:00",
+        findings=[finding],
+        contradictions=[_contradiction("C-001", ["E-010", "E-020"])],
+    )
+    digest["supporting_evidence"] = [
+        {
+            "evidence_id": "E-020",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "locator": "Section 4, CC4.1-01",
+            "excerpt": "No exceptions noted.",
+            "evidence_kind": "no_exception",
+        }
+    ]
+    _write(runs_dir, digest)
+    explained = explain_finding("dg_000000000002", "F-001")
+    assert explained["evidence"][0]["kind_label"] == "SOC 2 exception"
+    resolved = {
+        item["ref"]: item
+        for item in explained["contradictions_citing"][0]["evidence"]
+    }
+    assert resolved["E-010"]["kind_label"] == "SOC 2 exception"
+    assert (
+        resolved["E-020"]["kind_label"]
+        == "SOC 2 control tested — no exceptions"
+    )
+
+
 def test_compare_targets(runs_dir):
     _write(
         runs_dir,

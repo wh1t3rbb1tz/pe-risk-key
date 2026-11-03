@@ -543,6 +543,18 @@
         "collected_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "evidence_kind": {
+          "type": "string",
+          "description": "Internal pool category, preserved for labeling: SOC 2 exception, tested control, carve-out, CUEC, or notable observation.",
+          "enum": [
+            "exception",
+            "no_exception",
+            "carve_out",
+            "cuec",
+            "notable",
+            "bridge"
+          ]
         }
       }
     },

@@ -198,18 +198,48 @@ def test_pool_only_citation_copied_and_validates():
             "excerpt": "No exceptions noted.",
         },
     ]
-    copied = supporting_evidence(
+    copied, dropped = supporting_evidence(
         digest["findings"],
         digest["contradictions"],
         digest["deal_recommendations"],
         pool,
     )
+    assert dropped == []
     assert [item["evidence_id"] for item in copied] == ["E-004"]
     digest["supporting_evidence"] = copied
     assert validate_digest(digest) == []
     assert digest["supporting_evidence"][0]["excerpt"] == (
         "No exceptions noted."
     )
+
+
+def test_supporting_evidence_projects_internal_keys():
+    from pe_risk_key.agent.orchestrator import supporting_evidence
+
+    digest = _valid_digest()
+    digest["contradictions"][0]["evidence_refs"] = ["E-004"]
+    pool = [
+        {
+            "evidence_id": "E-004",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "locator": "Section 4, CC4.1-01",
+            "excerpt": "No exceptions noted.",
+            "evidence_kind": "no_exception",
+            "internal_debug_flag": True,
+        }
+    ]
+    copied, dropped = supporting_evidence(
+        digest["findings"],
+        digest["contradictions"],
+        digest["deal_recommendations"],
+        pool,
+    )
+    assert dropped == ["internal_debug_flag"]
+    assert "internal_debug_flag" not in copied[0]
+    assert copied[0]["evidence_kind"] == "no_exception"
+    digest["supporting_evidence"] = copied
+    assert validate_digest(digest) == []
 
 
 def test_deal_basis_accepts_supporting_evidence_ref():

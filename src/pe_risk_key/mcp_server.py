@@ -28,6 +28,14 @@ server = MCPServer(
 
 _SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 _RATING_RANK = {"A": 0, "B": 1, "C": 2, "D": 3, "F": 4}
+EVIDENCE_KIND_LABELS = {
+    "exception": "SOC 2 exception",
+    "no_exception": "SOC 2 control tested — no exceptions",
+    "carve_out": "SOC 2 carve-out",
+    "cuec": "SOC 2 CUEC",
+    "notable": "SOC 2 observation",
+    "bridge": "SOC 2 report period",
+}
 
 
 def _money(value: Any) -> str:
@@ -276,6 +284,9 @@ def explain_finding(digest_id: str, finding_id: str) -> dict[str, Any]:
             "ref": ref,
             "excerpt": target.get("excerpt"),
             "locator": target.get("locator"),
+            "kind_label": EVIDENCE_KIND_LABELS.get(
+                target.get("evidence_kind")
+            ),
         }
 
     citing = []
@@ -313,6 +324,9 @@ def explain_finding(digest_id: str, finding_id: str) -> dict[str, Any]:
                 "locator": item.get("locator"),
                 "collection_method": item.get("collection_method"),
                 "source_type": item.get("source_type"),
+                "kind_label": EVIDENCE_KIND_LABELS.get(
+                    item.get("evidence_kind")
+                ),
             }
             for item in finding.get("evidence", [])
         ],

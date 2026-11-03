@@ -54,6 +54,26 @@ def deal_recommendation_type_enum() -> list[str]:
     return list(items["properties"]["type"]["enum"])
 
 
+@lru_cache(maxsize=32)
+def _allowed_keys(def_name: str) -> frozenset[str]:
+    return frozenset(subschema(def_name).get("properties", {}))
+
+
+def project_onto_subschema(
+    item: dict[str, Any], def_name: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Project ``item`` onto a schema definition's properties.
+
+    Pool items may carry internal metadata keys the closed digest
+    schema rejects. Returns the projected copy plus the sorted names of
+    dropped keys.
+    """
+    allowed = _allowed_keys(def_name)
+    projected = {key: item[key] for key in item if key in allowed}
+    dropped = sorted(key for key in item if key not in allowed)
+    return projected, dropped
+
+
 def strip_nullable_optionals(obj: Any, def_name: str) -> Any:
     """Drop null-valued optional fields from strict-mode output.
 

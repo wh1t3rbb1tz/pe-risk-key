@@ -1161,6 +1161,10 @@ def test_interview_trace_events_per_claim(agent_env, monkeypatch, tmp_path):
     extracted = [e for e in trace if e["type"] == "claims_extracted"]
     assert len(extracted) == 1
     assert extracted[0]["claim_count"] == 2
+    merged_events = [e for e in trace if e["type"] == "claims_merged"]
+    assert len(merged_events) == 1
+    assert merged_events[0]["before"] == 2
+    assert merged_events[0]["after"] == 2
     verdicts = [e for e in trace if e["type"] == "crosscheck_verdict"]
     assert [(v["claim_index"], v["verdict"]) for v in verdicts] == [
         (0, "contradicted"),

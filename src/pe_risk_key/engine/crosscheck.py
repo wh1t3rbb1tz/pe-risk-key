@@ -27,8 +27,10 @@ SYSTEM_PROMPT = """You cross-check interview claims against assessment evidence.
 6. Keep each explanation under 500 characters."""
 
 MAX_EXPLANATION_CHARS = 500
+MAX_CLAIM_CHARS = 500
 
 _MEDIUM_UNSUPPORTED_TYPES = ("incident_history", "control_coverage")
+_VERDICT_PRECEDENCE = {"supported": 0, "unsupported": 1, "contradicted": 2}
 
 
 def crosscheck_schema() -> dict[str, Any]:
@@ -127,6 +129,19 @@ def _catalog_counts(
     }
 
 
+def _evidence_to_findings(
+    findings: list[dict],
+) -> dict[str, list[str]]:
+    """Map each attached evidence id to its finding ids."""
+    mapping: dict[str, list[str]] = {}
+    for finding in findings:
+        for item in finding.get("evidence", []):
+            mapping.setdefault(item.get("evidence_id"), []).append(
+                finding["finding_id"]
+            )
+    return mapping
+
+
 def _derive_severity(
     verdict: str,
     refs: list[str],
@@ -177,12 +192,7 @@ def crosscheck_claims(
         for item in evidence_pool
         if isinstance(item.get("evidence_id"), str)
     }
-    evidence_to_findings: dict[str, list[str]] = {}
-    for finding in findings:
-        for item in finding.get("evidence", []):
-            evidence_to_findings.setdefault(
-                item.get("evidence_id"), []
-            ).append(finding["finding_id"])
+    evidence_to_findings = _evidence_to_findings(findings)
     claim_lines = [
         f"[{claim.get('claim_index')}] "
         f"{claim.get('speaker')} @ {claim.get('timestamp')} "
@@ -279,3 +289,121 @@ def crosscheck_claims(
             usage, WONDER_USD_PER_MTOK
         ),
     }
+
+
+def _merge_cluster(items: list[dict[str, Any]], number: int) -> dict[str, Any]:
+    """One contradiction from same-turn fragments sharing evidence."""
+    best = max(
+        range(len(items)),
+        key=lambda i: (_VERDICT_PRECEDENCE[items[i]["verdict"]], -i),
+    )
+    refs: list[str] = []
+    for item in items:
+        for ref in item.get("evidence_refs", []):
+            if ref not in refs:
+                refs.append(ref)
+    first_claim = items[0].get("claim", {})
+    return {
+        "contradiction_id": f"C-{number + 1:03d}",
+        "claim": {
+            "speaker": first_claim.get("speaker"),
+            "timestamp": first_claim.get("timestamp"),
+            "text": " … ".join(
+                str(item.get("claim", {}).get("text") or "")
+                for item in items
+            )[:MAX_CLAIM_CHARS],
+            "claim_type": items[best].get("claim", {}).get("claim_type"),
+        },
+        "verdict": items[best]["verdict"],
+        "severity": max(
+            (item["severity"] for item in items),
+            key=lambda severity: SEVERITY_RANK[severity],
+        ),
+        "evidence_refs": refs,
+        "explanation": items[best].get("explanation", ""),
+    }
+
+
+def merge_contradictions(
+    contradictions: list[dict[str, Any]],
+    claims: list[dict[str, Any]],
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[list[Any]]]:
+    """Merge over-split same-turn fragments into one contradiction each.
+
+    Within one turn, fragments whose evidence_refs overlap (or link to
+    the same finding) merge: verdict by contradicted > unsupported >
+    supported precedence, max severity, unioned refs, fragments joined
+    with " … " (≤500 chars), and the top-precedence explanation.
+    Fragments with disjoint evidence stay separate, as do all
+    cross-turn pairs. C-ids renumber in first-appearance order.
+
+    ``contradictions`` pairs positionally with ``claims`` (the
+    cross-check emits one verdict per claim in order); the turn comes
+    from each claim's turn_index.
+
+    Returns (merged contradictions, member claim_index per merged item).
+    """
+    finding_by_id = {
+        finding["finding_id"]
+        for finding in findings
+        if isinstance(finding.get("finding_id"), str)
+    }
+    evidence_to_findings = _evidence_to_findings(findings)
+
+    def linked(refs: list[str]) -> set[str]:
+        out: set[str] = set()
+        for ref in refs:
+            if ref in finding_by_id:
+                out.add(ref)
+            out.update(evidence_to_findings.get(ref, ()))
+        return out
+
+    groups: dict[Any, list[int]] = {}
+    for position in range(len(contradictions)):
+        turn = None
+        if position < len(claims):
+            turn = claims[position].get("turn_index")
+        key = turn if turn is not None else ("_solo", position)
+        groups.setdefault(key, []).append(position)
+
+    merged: list[dict[str, Any]] = []
+    members: list[list[Any]] = []
+    for positions in groups.values():
+        parent = {position: position for position in positions}
+
+        def find(node: int) -> int:
+            while parent[node] != node:
+                parent[node] = parent[parent[node]]
+                node = parent[node]
+            return node
+
+        for left in range(len(positions)):
+            refs_left = set(
+                contradictions[positions[left]].get("evidence_refs", [])
+            )
+            for right in range(left + 1, len(positions)):
+                refs_right = set(
+                    contradictions[positions[right]].get("evidence_refs", [])
+                )
+                if refs_left & refs_right or (
+                    linked(list(refs_left)) & linked(list(refs_right))
+                ):
+                    parent[find(positions[left])] = find(positions[right])
+        clusters: dict[int, list[int]] = {}
+        for position in positions:
+            clusters.setdefault(find(position), []).append(position)
+        for root in sorted(clusters, key=lambda r: min(clusters[r])):
+            cluster = sorted(clusters[root])
+            merged.append(
+                _merge_cluster(
+                    [contradictions[p] for p in cluster], len(merged)
+                )
+            )
+            members.append(
+                [
+                    claims[p].get("claim_index") if p < len(claims) else None
+                    for p in cluster
+                ]
+            )
+    return merged, members

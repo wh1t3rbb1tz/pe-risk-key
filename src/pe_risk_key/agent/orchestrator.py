@@ -34,7 +34,10 @@ from pe_risk_key.agent.prompts import (
     system_prompt,
     target_brief,
 )
-from pe_risk_key.engine.crosscheck import crosscheck_claims
+from pe_risk_key.engine.crosscheck import (
+    crosscheck_claims,
+    merge_contradictions,
+)
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.engine.scoring import score_digest
 from pe_risk_key.providers import (
@@ -799,11 +802,17 @@ def run_digest(
             crosscheck_result = crosscheck_claims(
                 claims, merged, evidence_pool
             )
-            contradictions = crosscheck_result["contradictions"]
-            for claim, contradiction in zip(claims, contradictions):
+            pre_merge = crosscheck_result["contradictions"]
+            contradictions, members = merge_contradictions(
+                pre_merge, claims, merged
+            )
+            ctx.trace.event(
+                "claims_merged", before=len(pre_merge), after=len(contradictions)
+            )
+            for indices, contradiction in zip(members, contradictions):
                 ctx.trace.event(
                     "crosscheck_verdict",
-                    claim_index=claim["claim_index"],
+                    claim_index=indices[0] if indices else None,
                     contradiction_id=contradiction["contradiction_id"],
                     text=contradiction["claim"]["text"],
                     verdict=contradiction["verdict"],

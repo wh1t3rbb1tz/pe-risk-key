@@ -1,8 +1,11 @@
 """Tests for pe_risk_key.engine.crosscheck (mocked model). No network."""
 
 import copy
+from pathlib import Path
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 import pe_risk_key.engine.crosscheck as crosscheck_module
 from pe_risk_key.engine.crosscheck import crosscheck_claims
@@ -280,3 +283,187 @@ def test_catalog_counts_and_labels_no_exception(crosscheck_env):
     assert "Section 4, A1.2-01" in prompt
     assert "Section 4, CC4.1-01" in prompt
     assert "bridge letter" in prompt
+
+
+def _made_contradiction(cid, text, verdict, severity, refs):
+    return {
+        "contradiction_id": cid,
+        "claim": {
+            "speaker": "Dana Reyes (CTO)",
+            "timestamp": "00:00",
+            "text": text,
+            "claim_type": "control_exists",
+        },
+        "verdict": verdict,
+        "severity": severity,
+        "evidence_refs": list(refs),
+        "explanation": f"Why {cid}.",
+    }
+
+
+def _turn_claim(index, turn):
+    return {"claim_index": index, "turn_index": turn}
+
+
+def test_same_turn_overlapping_fragments_merge():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "supported", "info", ["E-004"]),
+        _made_contradiction(
+            "C-002", "Frag two.", "contradicted", "high", ["F-001", "E-004"]
+        ),
+    ]
+    merged, members = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 0), _turn_claim(1, 0)],
+        FINDINGS,
+    )
+    assert len(merged) == 1
+    assert members == [[0, 1]]
+    (only,) = merged
+    assert only["contradiction_id"] == "C-001"
+    assert only["verdict"] == "contradicted"
+    assert only["severity"] == "high"
+    assert only["evidence_refs"] == ["E-004", "F-001"]
+    assert only["claim"]["text"] == "Frag one. … Frag two."
+    assert only["explanation"] == "Why C-002."
+
+
+def test_precedence_prefers_unsupported_over_supported():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "supported", "info", ["E-001"]),
+        _made_contradiction("C-002", "Frag two.", "unsupported", "low", ["E-001"]),
+    ]
+    merged, _ = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 3), _turn_claim(1, 3)],
+        FINDINGS,
+    )
+    (only,) = merged
+    assert only["verdict"] == "unsupported"
+    assert only["severity"] == "low"
+    assert only["explanation"] == "Why C-002."
+
+
+def test_fragments_linking_same_finding_merge():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "supported", "info", ["F-001"]),
+        _made_contradiction("C-002", "Frag two.", "supported", "info", ["E-001"]),
+    ]
+    merged, _ = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 1), _turn_claim(1, 1)],
+        FINDINGS,
+    )
+    assert len(merged) == 1
+    assert merged[0]["evidence_refs"] == ["F-001", "E-001"]
+
+
+def test_disjoint_fragments_stay_separate_and_renumber():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "contradicted", "high", ["F-001"]),
+        _made_contradiction("C-002", "Frag two.", "contradicted", "high", ["E-004"]),
+        _made_contradiction(
+            "C-003", "Frag three.", "contradicted", "critical", ["F-002"]
+        ),
+    ]
+    merged, members = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 0), _turn_claim(1, 0), _turn_claim(2, 0)],
+        FINDINGS,
+    )
+    assert [c["contradiction_id"] for c in merged] == ["C-001", "C-002", "C-003"]
+    assert members == [[0], [1], [2]]
+
+
+def test_cross_turn_fragments_never_merge():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "supported", "info", ["E-004"]),
+        _made_contradiction("C-002", "Frag two.", "supported", "info", ["E-004"]),
+    ]
+    merged, _ = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 0), _turn_claim(1, 5)],
+        FINDINGS,
+    )
+    assert len(merged) == 2
+
+
+def test_refless_fragments_stay_separate():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "Frag one.", "unsupported", "low", []),
+        _made_contradiction("C-002", "Frag two.", "unsupported", "low", []),
+    ]
+    merged, _ = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 0), _turn_claim(1, 0)],
+        FINDINGS,
+    )
+    assert len(merged) == 2
+
+
+def test_merged_text_capped_at_500_chars():
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+
+    contradictions = [
+        _made_contradiction("C-001", "A" * 300, "supported", "info", ["E-001"]),
+        _made_contradiction("C-002", "B" * 300, "supported", "info", ["E-001"]),
+    ]
+    merged, _ = merge_contradictions(
+        contradictions,
+        [_turn_claim(0, 0), _turn_claim(1, 0)],
+        FINDINGS,
+    )
+    assert merged[0]["claim"]["text"] == ("A" * 300 + " … " + "B" * 300)[:500]
+
+
+def test_cap_contradiction_evaluated_on_merged_list(crosscheck_env):
+    import yaml
+
+    from pe_risk_key.engine.crosscheck import merge_contradictions
+    from pe_risk_key.engine.scoring import score_digest
+
+    scoring = yaml.safe_load(
+        (ROOT / "scoring.yaml").read_text(encoding="utf-8")
+    )
+    crosscheck_env.verdicts = [
+        _verdict(0, "contradicted", ["F-001"]),
+        _verdict(1, "contradicted", ["F-001"]),
+        _verdict(2, "contradicted", ["F-001"]),
+    ]
+    claims = [
+        dict(_claim(0, "Frag one."), turn_index=0),
+        dict(_claim(1, "Frag two."), turn_index=0),
+        dict(_claim(2, "Frag three."), turn_index=0),
+    ]
+    result = crosscheck_claims(claims, FINDINGS, POOL)
+    merged, _ = merge_contradictions(
+        result["contradictions"], claims, FINDINGS
+    )
+    assert len(merged) == 1
+    out = score_digest([], merged, scoring, revenue_band="50M-250M")
+    assert out["overall"]["rating_caps_applied"] == []
+    split = [
+        dict(_claim(0, "Frag one."), turn_index=0),
+        dict(_claim(1, "Frag two."), turn_index=4),
+    ]
+    crosscheck_env.verdicts = [
+        _verdict(0, "contradicted", ["F-001"]),
+        _verdict(1, "contradicted", ["F-001"]),
+    ]
+    result = crosscheck_claims(split, FINDINGS, POOL)
+    merged, _ = merge_contradictions(result["contradictions"], split, FINDINGS)
+    assert len(merged) == 2
+    out = score_digest([], merged, scoring, revenue_band="50M-250M")
+    assert out["overall"]["rating_caps_applied"] == ["CAP-CONTRADICTION"]

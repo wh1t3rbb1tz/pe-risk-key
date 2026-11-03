@@ -1,0 +1,287 @@
+{
+  "evidence": [
+    {
+      "evidence_id": "E-001",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "_dmarc.brightwaterfleet.example TXT",
+      "excerpt": "DMARC record: v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example; policy=none, pct=100, rua=true"
+    },
+    {
+      "evidence_id": "E-002",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "brightwaterfleet.example TXT",
+      "excerpt": "SPF record: v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all; qualifier=~all, lookup_count=2"
+    },
+    {
+      "evidence_id": "E-003",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_dnssec",
+      "locator": "brightwaterfleet.example DS",
+      "excerpt": "DNSSEC enabled=false on DS query for brightwaterfleet.example"
+    },
+    {
+      "evidence_id": "E-004",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "vpn.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=vpn, first_seen 2023-02-11, last_seen 2026-09-30; risky_hostnames_count=4"
+    },
+    {
+      "evidence_id": "E-005",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "jenkins-old.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=jenkins|old, first_seen 2021-06-03, last_seen 2026-08-14"
+    },
+    {
+      "evidence_id": "E-006",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "staging-api.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=staging, first_seen 2024-01-20, last_seen 2026-10-01"
+    },
+    {
+      "evidence_id": "E-007",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "legacy-portal.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=legacy, first_seen 2019-11-05, last_seen 2026-07-22"
+    },
+    {
+      "evidence_id": "E-008",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+      "excerpt": "CT logs show unique_hostnames=47, risky_hostnames_count=4 for a 201-1000 employee company"
+    },
+    {
+      "evidence_id": "E-009",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "tls_support TLSv1.0=true, TLSv1.1=true, TLSv1.2=true; tls_versions=[TLSv1.0, TLSv1.1, TLSv1.2]"
+    },
+    {
+      "evidence_id": "E-010",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://brightwaterfleet.example/",
+      "excerpt": "headers strict-transport-security=null"
+    },
+    {
+      "evidence_id": "E-011",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "headers strict-transport-security=null"
+    },
+    {
+      "evidence_id": "E-012",
+      "source_type": "outside_in",
+      "collection_method": "offline_lookup",
+      "collector": "match_known_exploited",
+      "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+      "excerpt": "KEV match CVE-PLACEHOLDER-0001, ExampleGate SSL-VPN version 7.0.11, match_level=product, match_tier=appliance_exposed; KEV lists products, not affected versions; version not verified."
+    },
+    {
+      "evidence_id": "E-013",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+      "excerpt": "Fingerprint product=ExampleGate SSL-VPN, version=7.0.11, kind=appliance, source=asset_path"
+    },
+    {
+      "evidence_id": "E-014",
+      "source_type": "public_record",
+      "collection_method": "search_grounding",
+      "collector": "search_public_incidents",
+      "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+      "excerpt": "State AG breach notice 2025-08-14: unauthorized access to a customer support system; approx. 3,100 individuals notified. Entity match exact; disclosed_within_months=14."
+    },
+    {
+      "evidence_id": "E-015",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC6.1-01",
+      "excerpt": "**Exception noted.** 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy.",
+      "evidence_kind": "exception"
+    },
+    {
+      "evidence_id": "E-016",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC6.2-01",
+      "excerpt": "**Exception noted.** 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively.",
+      "evidence_kind": "exception"
+    },
+    {
+      "evidence_id": "E-017",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC7.2-01",
+      "excerpt": "**Exception noted.** For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed.",
+      "evidence_kind": "exception"
+    },
+    {
+      "evidence_id": "E-018",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC8.1-01",
+      "excerpt": "**Exception noted.** 2 of 40 changes lacked documented approval (emergency hotfixes).",
+      "evidence_kind": "exception"
+    },
+    {
+      "evidence_id": "E-019",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC6.6-01",
+      "excerpt": "No exceptions noted.",
+      "evidence_kind": "no_exception"
+    },
+    {
+      "evidence_id": "E-020",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC9.2-01",
+      "excerpt": "No exceptions noted.",
+      "evidence_kind": "no_exception"
+    },
+    {
+      "evidence_id": "E-021",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control A1.2-01",
+      "excerpt": "No exceptions noted.",
+      "evidence_kind": "no_exception"
+    },
+    {
+      "evidence_id": "E-022",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC4.1-01",
+      "excerpt": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control.",
+      "evidence_kind": "no_exception"
+    },
+    {
+      "evidence_id": "E-023",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 1, Subservice organizations; Section 3, Section 3.2",
+      "excerpt": "Nimbus Cloud Services is carved out of scope: Infrastructure hosting; production workloads run in Nimbus Cloud Services..",
+      "evidence_kind": "carve_out"
+    },
+    {
+      "evidence_id": "E-024",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 1, Subservice organizations",
+      "excerpt": "LedgerPay Payroll is carved out of scope: HR and payroll processing, including employee termination records..",
+      "evidence_kind": "carve_out"
+    },
+    {
+      "evidence_id": "E-025",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 3, Section 3.5, CUEC 1",
+      "excerpt": "Provisioning and de-provisioning their own users' access to the Brightwater platform.",
+      "evidence_kind": "cuec"
+    },
+    {
+      "evidence_id": "E-026",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 3, Section 3.5, CUEC 2",
+      "excerpt": "Enabling SSO/MFA for their users through the customer administration console.",
+      "evidence_kind": "cuec"
+    },
+    {
+      "evidence_id": "E-027",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 3, Section 3.5, CUEC 3",
+      "excerpt": "Reviewing user access to the platform at least quarterly.",
+      "evidence_kind": "cuec"
+    },
+    {
+      "evidence_id": "E-028",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 3, Section 3.5, CUEC 4",
+      "excerpt": "Notifying Brightwater promptly of suspected security incidents involving their accounts.",
+      "evidence_kind": "cuec"
+    },
+    {
+      "evidence_id": "E-029",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 3, Section 3.5, CUEC 5",
+      "excerpt": "Securing API credentials issued to them.",
+      "evidence_kind": "cuec"
+    },
+    {
+      "evidence_id": "E-030",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 4, control CC4.1-01",
+      "excerpt": "No exceptions noted. 2 high-severity findings were reported in the test; remediation status was outside the scope of this control.",
+      "evidence_kind": "notable"
+    },
+    {
+      "evidence_id": "E-031",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 5, Other Information Provided by Management (unaudited)",
+      "excerpt": "Management plans to obtain a bridge letter covering April 1, 2026 forward upon request.",
+      "evidence_kind": "notable"
+    },
+    {
+      "evidence_id": "E-032",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "Section 1, Subservice organizations",
+      "excerpt": "Our examination did not extend to controls of the subservice organizations.",
+      "evidence_kind": "notable"
+    },
+    {
+      "evidence_id": "E-033",
+      "source_type": "document",
+      "collection_method": "document_upload",
+      "collector": "soc2_analyzer",
+      "locator": "brightwater_soc2_type2.md (report period)",
+      "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30.",
+      "evidence_kind": "bridge"
+    }
+  ]
+}

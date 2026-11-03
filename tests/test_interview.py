@@ -437,3 +437,33 @@ def test_claim_in_first_turn_has_no_context_question(interview_env):
     (claim,) = result["claims"]
     assert claim["turn_index"] == 0
     assert claim["context_question"] is None
+
+
+def test_stale_cache_derives_first_run_cost(interview_env):
+    import hashlib
+
+    sha256 = hashlib.sha256(interview_env.read_bytes()).hexdigest()
+    interview_module.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (interview_module.CACHE_DIR / f"{sha256}.json").write_text(
+        json.dumps(
+            {
+                "duration_seconds": 65.0,
+                "segments": [
+                    {
+                        "speaker_label": "A",
+                        "start": "00:00",
+                        "text": "Hello.",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    transcript = transcribe_interview(interview_env, "iv_stale")
+    assert transcript["cached"] is True
+    assert len(_ScriptedInterviewClient.transcribe_calls) == 0
+    assert transcript["usage"]["audio_hours"] == round(65 / 3600, 6)
+    assert transcript["usage"]["first_run_cost_usd"] == pytest.approx(
+        65 / 3600 * 0.18
+    )
+    assert transcript["estimated_cost_usd"] == 0.0

@@ -40,7 +40,8 @@ CLAIM_SYSTEM_PROMPT = """You extract security claims from an interview transcrip
 3. Only extract claims spoken by one of the target speakers listed with the transcript.
 4. Copy claim text verbatim from a single turn; never paraphrase or invent text. Keep text under 500 characters. Split a multi-sentence answer into separate claims only when each sentence is a distinct assertion.
 5. claim_type: control_exists (a control is in place), control_coverage (scope or frequency of a control), incident_history (a past incident or its handling), third_party_assurance (audits, reports, vendor assurance), process_maturity (how run or mature a process is).
-6. Transcript lines are labeled [turn N | speaker | MM:SS]; use them for context only."""
+6. Transcript lines are labeled [turn N | speaker | MM:SS]; use them for context only.
+7. Extract one claim per distinct control or topic per answer; keep a multi-sentence answer about the same topic as one claim. Statements about the availability of assurance documents (bridge letters, pen test reports, SOC reports) are claims of type third_party_assurance."""
 
 
 def _locate_claim(
@@ -177,15 +178,23 @@ def transcribe_interview(
     cache_path = CACHE_DIR / f"{sha256}.json"
     if cache_path.exists():
         cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        duration = cached["duration_seconds"]
         return {
             "interview_id": interview_id,
             "sha256": sha256,
-            "duration_seconds": cached["duration_seconds"],
+            "duration_seconds": duration,
             "turns": _apply_speaker_names(cached["segments"], speaker_names),
             "usage": {
-                "audio_hours": cached.get("audio_hours", 0.0),
+                # Entries cached before usage was stored derive it
+                # from the duration so the cost line stays truthful.
+                "audio_hours": cached.get(
+                    "audio_hours", round(duration / 3600, 6)
+                ),
                 "cached": True,
-                "first_run_cost_usd": cached.get("estimated_cost_usd", 0.0),
+                "first_run_cost_usd": cached.get(
+                    "estimated_cost_usd",
+                    estimate_transcription_cost_usd(duration),
+                ),
             },
             "estimated_cost_usd": 0.0,
             "cached": True,

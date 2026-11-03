@@ -376,6 +376,27 @@ def dedupe_evidence_pool(
     return merged, deduped
 
 
+def _verdict_excerpt(
+    refs: list[str],
+    finding_by_id: dict[str, dict[str, Any]],
+    evidence_pool: list[dict[str, Any]],
+) -> str:
+    """First resolvable evidence text for cross-check refs."""
+    pool = {
+        item.get("evidence_id"): item.get("excerpt", "")
+        for item in evidence_pool
+    }
+    for ref in refs:
+        if ref in finding_by_id:
+            evidence = finding_by_id[ref].get("evidence", [])
+            if evidence:
+                return evidence[0].get("excerpt", "")
+            return finding_by_id[ref].get("title", "")
+        if ref in pool:
+            return pool[ref]
+    return ""
+
+
 def _model_invoked(tool_name: str, collector_outputs: dict[str, Any]) -> bool:
     """Whether a collector step invoked its model in this run.
 
@@ -580,6 +601,7 @@ def run_digest(
     interview_path: str | Path | None = None,
     speaker_names: list[str] | None = None,
     target_speakers: list[str] | None = None,
+    digest_id: str | None = None,
 ) -> dict[str, Any]:
     """Run the orchestrator end to end; returns the digest result.
 
@@ -598,7 +620,10 @@ def run_digest(
     The final step drafts the IC narrative from the scored digest.
     """
     alias_list = list(aliases or [])
-    digest_id = new_digest_id()
+    if digest_id is None:
+        digest_id = new_digest_id()
+    elif not re.fullmatch(r"dg_[a-z0-9]{12}", digest_id):
+        raise ValueError(f"Invalid digest_id: {digest_id!r}.")
     run_dir = RUNS_DIR / digest_id
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = RunContext(
@@ -645,6 +670,7 @@ def run_digest(
     soc2_doc_id: str | None = None
     if soc2_path is not None:
         soc2_doc_id = "doc_" + digest_id[3:]
+        ctx.trace.event("stage", stage="analyzing_documents")
         soc2_future = pool.submit(
             _run_soc2_analysis,
             ctx,
@@ -658,6 +684,7 @@ def run_digest(
     interview_id: str | None = None
     if interview_path is not None:
         interview_id = "int_" + digest_id[3:]
+        ctx.trace.event("stage", stage="transcribing")
         interview_future = pool.submit(
             _run_interview,
             ctx,
@@ -666,6 +693,7 @@ def run_digest(
             speaker_names,
             list(target_speakers or []),
         )
+    ctx.trace.event("stage", stage="collecting")
     try:
         for turn in range(MAX_TURNS):
             ctx.trace.event("model_turn_start", turn=turn)
@@ -878,6 +906,7 @@ def run_digest(
             json.dumps({"claims": claims}, indent=2), encoding="utf-8"
         )
         if claims:
+            ctx.trace.event("stage", stage="cross_checking")
             crosscheck_result = crosscheck_claims(
                 claims, merged, evidence_pool
             )
@@ -888,6 +917,9 @@ def run_digest(
             ctx.trace.event(
                 "claims_merged", before=len(pre_merge), after=len(contradictions)
             )
+            finding_by_id = {
+                finding["finding_id"]: finding for finding in merged
+            }
             for indices, contradiction in zip(members, contradictions):
                 ctx.trace.event(
                     "crosscheck_verdict",
@@ -895,9 +927,16 @@ def run_digest(
                     contradiction_id=contradiction["contradiction_id"],
                     text=contradiction["claim"]["text"],
                     verdict=contradiction["verdict"],
+                    severity=contradiction["severity"],
                     refs=contradiction["evidence_refs"],
+                    excerpt=_verdict_excerpt(
+                        contradiction["evidence_refs"],
+                        finding_by_id,
+                        evidence_pool,
+                    ),
                 )
 
+    ctx.trace.event("stage", stage="scoring")
     scored = score_digest(
         merged,
         contradictions,
@@ -922,6 +961,7 @@ def run_digest(
             "exception_count": len(soc2_analysis["exceptions"]),
             "bridge_gap_days": soc2_analysis["bridge_gap_days"],
         }
+    ctx.trace.event("stage", stage="writing_narrative")
     narrative_result = generate_narrative(
         {
             "target": {
@@ -1028,6 +1068,7 @@ def run_digest(
         "estimated_cost_usd": narrative_result["estimated_cost_usd"],
     }
     usage = merge_usage_breakdown(components)
+    ctx.trace.event("stage", stage="complete")
     (run_dir / "ic_memo.md").write_text(
         render_ic_memo(
             digest,

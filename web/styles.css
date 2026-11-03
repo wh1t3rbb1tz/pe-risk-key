@@ -62,6 +62,20 @@ button:disabled { opacity: 0.5; cursor: default; }
 .topbar-center { display: flex; align-items: center; gap: 10px; flex: 1; }
 .run-label { color: var(--muted); }
 #run-picker { min-width: 340px; }
+#older-runs { position: relative; font-size: 12px; color: var(--muted); }
+#older-runs summary { cursor: pointer; white-space: nowrap; }
+#older-list {
+  position: absolute; top: 130%; left: 0; z-index: 40;
+  min-width: 320px; max-height: 300px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px;
+}
+.older-run {
+  display: block; width: 100%; text-align: left;
+  background: none; border: none; border-radius: 3px;
+  padding: 5px 8px; font-size: 12px; font-family: var(--mono);
+}
+.older-run:hover { background: var(--panel-2); }
 #new-digest-btn { margin-left: auto; }
 .conn { color: var(--medium); font-size: 12px; }
 

@@ -307,6 +307,141 @@ def test_app_js_selectors_are_native():
     assert not bad, f"non-native selectors: {bad}"
 
 
+def _complete_digest(digest_id, generated_at, summary="Bottom line: fine."):
+    functions = ["GV", "ID", "PR", "DE", "RS", "RC"]
+    return {
+        "schema_version": "1.0.0",
+        "digest_id": digest_id,
+        "generated_at": generated_at,
+        "target": {
+            "name": "Acme",
+            "domain": "acme.example",
+            "employee_band": "201-1000",
+            "revenue_band": "50M-250M",
+        },
+        "mode": {
+            "confidential": False,
+            "providers": [
+                {
+                    "role": "orchestrator",
+                    "provider": "meta_model_api",
+                    "model": "muse-wonder-1.0",
+                }
+            ],
+        },
+        "inputs": {
+            "domain_scan": True,
+            "documents": [
+                {
+                    "doc_id": "doc_soc2x",
+                    "type": "soc2_type2",
+                    "filename": "soc2.md",
+                    "sha256": "ab" * 32,
+                }
+            ],
+            "interviews": [
+                {
+                    "interview_id": "int_iv01",
+                    "filename": "iv.wav",
+                    "sha256": "cd" * 32,
+                    "duration_seconds": 60,
+                }
+            ],
+        },
+        "overall": {
+            "score": 72.5,
+            "rating": "C",
+            "deal_signal": "proceed_with_conditions",
+            "confidence": "medium",
+            "rating_caps_applied": [],
+        },
+        "function_scores": [
+            {
+                "function": function,
+                "score": 80.0,
+                "finding_count": 0,
+                "assessed": True,
+            }
+            for function in functions
+        ],
+        "findings": [],
+        "contradictions": [],
+        "remediation_plan": {
+            "items": [],
+            "total_cost_low_usd": 0,
+            "total_cost_high_usd": 0,
+        },
+        "deal_recommendations": [],
+        "narrative": {"executive_summary": summary},
+        "limitations": ["Demo."],
+    }
+
+
+def _write_digest(api_env, digest_id, digest):
+    run_dir = api_env / "runs" / digest_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "digest.json").write_text(
+        json.dumps(digest), encoding="utf-8"
+    )
+
+
+def test_list_sorts_newest_first(client, api_env, monkeypatch):
+    _write_digest(
+        api_env,
+        "dg_000000000001",
+        _complete_digest("dg_000000000001", "2026-01-01T00:00:00+00:00"),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000003",
+        _complete_digest("dg_000000000003", "2026-03-01T00:00:00+00:00"),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000002",
+        _complete_digest("dg_000000000002", "2026-02-01T00:00:00+00:00"),
+    )
+    monkeypatch.setitem(api.jobs, "dg_000000000004", {"status": "running"})
+    ids = [
+        entry["digest_id"]
+        for entry in client.get("/api/digests").json()["digests"]
+    ]
+    assert ids == ["dg_000000000003", "dg_000000000002", "dg_000000000001", "dg_000000000004"]
+
+
+def test_list_complete_and_schema_flags(client, api_env):
+    _write_digest(
+        api_env,
+        "dg_000000000005",
+        _complete_digest("dg_000000000005", "2026-03-01T00:00:00+00:00"),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000006",
+        _complete_digest(
+            "dg_000000000006", "2026-02-01T00:00:00+00:00",
+            summary="Narrative pending.",
+        ),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000007",
+        {"digest_id": "dg_000000000007", "generated_at": "2026-01-01T00:00:00+00:00"},
+    )
+    entries = {
+        entry["digest_id"]: entry
+        for entry in client.get("/api/digests").json()["digests"]
+    }
+    assert entries["dg_000000000005"]["complete"] is True
+    assert entries["dg_000000000005"]["schema_valid"] is True
+    assert entries["dg_000000000005"]["has_soc2"] is True
+    assert entries["dg_000000000005"]["has_interview"] is True
+    assert entries["dg_000000000006"]["complete"] is False
+    assert entries["dg_000000000006"]["schema_valid"] is True
+    assert entries["dg_000000000007"]["complete"] is False
+    assert entries["dg_000000000007"]["schema_valid"] is False
+
+
 def test_digest_memo_trace_endpoints(client, api_env):
     run_dir = _run_dir(api_env)
     (run_dir / "digest.json").write_text(

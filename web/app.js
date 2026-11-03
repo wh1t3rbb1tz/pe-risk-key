@@ -202,7 +202,50 @@ function displayError(err) {
 
 /* ---- run list + picker ---- */
 
-async function loadRuns() {
+function fmtDateTime(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    date.getFullYear() +
+    "-" +
+    pad(date.getMonth() + 1) +
+    "-" +
+    pad(date.getDate()) +
+    " " +
+    pad(date.getHours()) +
+    ":" +
+    pad(date.getMinutes())
+  );
+}
+
+function fmtInputs(entry) {
+  let label = "outside-in";
+  if (entry.has_soc2) label += " +SOC 2";
+  if (entry.has_interview) label += " +interview";
+  return label;
+}
+
+function runLabel(entry) {
+  const target = entry.target || {};
+  const company = target.name || target.domain || entry.digest_id;
+  return (
+    company +
+    " · " +
+    (entry.rating || entry.status) +
+    " · " +
+    fmtDateTime(entry.generated_at) +
+    " · " +
+    fmtInputs(entry) +
+    " · " +
+    (entry.cost === null || entry.cost === undefined
+      ? "—"
+      : fmtCost(entry.cost))
+  );
+}
+
+async function loadRuns(autoselect) {
   const body = await api("/api/digests");
   costByDigest = {};
   statusByDigest = {};
@@ -210,19 +253,45 @@ async function loadRuns() {
   picker
     .querySelectorAll('option:not([value=""])')
     .forEach((o) => o.remove());
+  const older = $("older-list");
+  older.replaceChildren();
+  let completeCount = 0;
   for (const entry of body.digests || []) {
     costByDigest[entry.digest_id] = entry.cost;
     statusByDigest[entry.digest_id] = entry.status;
-    const option = el("option");
-    option.value = entry.digest_id;
-    const target = entry.target || {};
-    option.textContent =
-      (target.name || target.domain || entry.digest_id) +
-      " · " +
-      (entry.rating || entry.status) +
-      " · " +
-      (entry.decision || "");
-    picker.appendChild(option);
+    if (entry.complete) {
+      completeCount += 1;
+      const option = el("option");
+      option.value = entry.digest_id;
+      option.textContent = runLabel(entry);
+      picker.appendChild(option);
+    } else {
+      const button = el("button", "older-run");
+      button.type = "button";
+      const target = entry.target || {};
+      button.textContent =
+        (target.name || target.domain || entry.digest_id) +
+        " · " +
+        (entry.rating || entry.status) +
+        " · " +
+        fmtDateTime(entry.generated_at);
+      button.addEventListener("click", () => {
+        $("older-runs").open = false;
+        openRun(entry.digest_id).catch((err) => displayError(err));
+        $("run-picker").value = "";
+      });
+      older.appendChild(button);
+    }
+  }
+  const olderCount = (body.digests || []).length - completeCount;
+  $("older-runs").hidden = olderCount === 0;
+  $("older-summary").textContent =
+    "Older / incomplete runs (" + olderCount + ")";
+  if (autoselect) {
+    const newest = (body.digests || []).find((entry) => entry.complete);
+    if (newest) {
+      await openRun(newest.digest_id).catch((err) => displayError(err));
+    }
   }
 }
 
@@ -242,7 +311,7 @@ async function openRun(id) {
   try {
     digest = await api(`/api/digests/${id}`);
   } catch (err) {
-    if (statusByDigest[id] === "failed") {
+    if (statusByDigest[id] === "error") {
       openFailedRun(id).catch((e) =>
         e && e.isApiError ? showRailError(e.message) : displayError(e)
       );
@@ -1417,7 +1486,7 @@ function boot() {
   $("adjustments-toggle").addEventListener("click", () => {
     $("adjustments").hidden = !$("adjustments").hidden;
   });
-  loadRuns().catch((err) => {
+  loadRuns(true).catch((err) => {
     if (err && err.isApiError) {
       $("empty-state").textContent = err.message;
     } else {

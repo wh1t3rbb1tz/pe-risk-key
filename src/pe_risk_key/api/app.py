@@ -28,6 +28,9 @@ from pydantic import BaseModel
 from pe_risk_key.agent.context import new_digest_id
 from pe_risk_key.agent.orchestrator import run_digest
 from pe_risk_key.engine.narrative import DEAL_SIGNAL_LABELS
+from pe_risk_key.validate import validate_digest
+
+NARRATIVE_PENDING = "Narrative pending."
 
 ROOT = Path(__file__).resolve().parents[3]
 RUNS_DIR = ROOT / "eval" / "runs"
@@ -267,7 +270,17 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                 digest = json.loads(digest_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError:
                 continue
+            if not isinstance(digest, dict):
+                continue
             overall = digest.get("overall", {})
+            inputs = digest.get("inputs", {})
+            schema_valid = not validate_digest(digest)
+            summary = digest.get("narrative", {}).get("executive_summary")
+            complete = (
+                schema_valid
+                and bool(summary)
+                and summary != NARRATIVE_PENDING
+            )
             runs.append(
                 {
                     "digest_id": run_dir.name,
@@ -280,6 +293,10 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "deal_signal": overall.get("deal_signal"),
                     "generated_at": digest.get("generated_at"),
                     "cost": _run_cost(run_dir),
+                    "complete": complete,
+                    "schema_valid": schema_valid,
+                    "has_soc2": bool(inputs.get("documents")),
+                    "has_interview": bool(inputs.get("interviews")),
                 }
             )
             continue
@@ -296,6 +313,10 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "deal_signal": None,
                     "generated_at": None,
                     "cost": None,
+                    "complete": False,
+                    "schema_valid": False,
+                    "has_soc2": False,
+                    "has_interview": False,
                     **(
                         {"error": job["error"]}
                         if job.get("status") == "error"
@@ -320,9 +341,19 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                 "deal_signal": None,
                 "generated_at": None,
                 "cost": None,
+                "complete": False,
+                "schema_valid": False,
+                "has_soc2": False,
+                "has_interview": False,
             }
         )
-    return {"digests": runs}
+    dated = sorted(
+        (run for run in runs if run["generated_at"]),
+        key=lambda run: run["generated_at"],
+        reverse=True,
+    )
+    undated = [run for run in runs if not run["generated_at"]]
+    return {"digests": dated + undated}
 
 
 @app.get("/api/digests/{digest_id}")

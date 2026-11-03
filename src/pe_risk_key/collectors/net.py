@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Network boundary (SPEC §2). The ONLY module allowed HTTP requests.
 
 Every HTTP call in the collectors package goes through :func:`safe_get`,

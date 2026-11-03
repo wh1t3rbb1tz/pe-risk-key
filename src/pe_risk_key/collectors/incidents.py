@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """search_public_incidents collector: grounded search + strict extraction.
 
 Two phases, because single-shot structured output fails when the

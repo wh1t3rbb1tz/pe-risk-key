@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Internal extraction schemas for document analyzers (SPEC §4.2)."""
 
 from __future__ import annotations

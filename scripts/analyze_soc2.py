@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Analyze one SOC 2 report file and print the result.
 
 Makes one live Muse Wonder call; run manually, not from the test suite.

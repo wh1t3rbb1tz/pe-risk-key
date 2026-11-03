@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Deterministic scoring (SPEC §4.5, scoring.yaml).
 
 Pure Python, no model calls. Same findings in -> same score out: all

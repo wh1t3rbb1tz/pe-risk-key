@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """check_web_posture collector: one HTTPS GET per host + TLS inspection."""
 
 from __future__ import annotations

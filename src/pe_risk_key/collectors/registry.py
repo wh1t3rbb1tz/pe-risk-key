@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Collector registry: tool definitions for the orchestrator + run dispatch.
 
 Each collector module registers itself with :func:`register`, giving its

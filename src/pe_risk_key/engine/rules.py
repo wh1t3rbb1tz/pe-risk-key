@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Deterministic rule constraints (SPEC §4.5, scoring.yaml).
 
 The model proposes findings; this module clamps them to the matching

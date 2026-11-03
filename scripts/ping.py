@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Smoke test: one minimal chat call against the Meta Model API."""
 
 from pe_risk_key.providers import SPARK_MODEL, ModelClient

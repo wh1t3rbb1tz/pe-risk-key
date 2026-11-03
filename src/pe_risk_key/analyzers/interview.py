@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Interview pipeline (SPEC §4.3): transcribe, extract, verify claims.
 
 ``transcribe_interview`` calls Muse Voice Transcribe with diarization

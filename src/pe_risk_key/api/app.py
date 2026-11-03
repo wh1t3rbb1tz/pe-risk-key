@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Local REST + SSE API for digests (dashboard backend)."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """enumerate_ct_subdomains collector: hostnames from CT logs."""
 
 from __future__ import annotations

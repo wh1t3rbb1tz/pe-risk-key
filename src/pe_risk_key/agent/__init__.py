@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Orchestrator agent: model loop over collector tools (SPEC §3)."""
 
 from pe_risk_key.agent.orchestrator import run_digest

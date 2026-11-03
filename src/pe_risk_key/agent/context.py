@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Per-run orchestrator state: outputs cache, net limits, trace writer."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Download the CISA KEV catalog once to data/kev_snapshot.json.
 
 US government public data; the snapshot is fine to commit. Re-run to

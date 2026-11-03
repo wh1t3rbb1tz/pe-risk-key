@@ -7,6 +7,7 @@ authors = [
     { name = "J.J.", email = "jjpowell@outlook.com" }
 ]
 requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
 dependencies = [
     "dnspython>=2.9.0",
     "fastapi>=0.162.0",

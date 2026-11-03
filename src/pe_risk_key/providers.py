@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Model routing and providers (SPEC §3).
 
 One provider interface, OpenAI-compatible, selected by config::

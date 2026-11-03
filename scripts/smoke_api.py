@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """End-to-end smoke test against a running API server (127.0.0.1:8000).
 
 Fetches demo inputs, uploads the demo fixtures, posts a digest run,

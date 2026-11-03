@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Orchestrator model loop: tools, coverage, post-processing.
 
 ``run_digest`` drives Muse Wonder through the collector tools, enforces

@@ -1,0 +1,167 @@
+{
+  "schema_version": "1.0.0",
+  "digest_id": "dg_6jw6a3gwy462",
+  "generated_at": "2026-11-03T04:12:50.055148+00:00",
+  "target": {
+    "name": "Copperline Analytics",
+    "domain": "copperline.example",
+    "revenue_band": "50M-250M",
+    "employee_band": "201-1000"
+  },
+  "mode": {
+    "confidential": false,
+    "demo": true,
+    "providers": [
+      {
+        "role": "orchestrator",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "narrative",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      }
+    ]
+  },
+  "inputs": {
+    "domain_scan": true,
+    "documents": [],
+    "interviews": [],
+    "served_from_fixture": true
+  },
+  "overall": {
+    "score": 98.3636,
+    "rating": "B",
+    "deal_signal": "proceed_with_conditions",
+    "confidence": "low",
+    "rating_caps_applied": [
+      "CAP-LOW-COVERAGE"
+    ]
+  },
+  "function_scores": [
+    {
+      "function": "GV",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": false
+    },
+    {
+      "function": "ID",
+      "score": 94.0,
+      "finding_count": 1,
+      "assessed": true
+    },
+    {
+      "function": "PR",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": true
+    },
+    {
+      "function": "DE",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": false
+    },
+    {
+      "function": "RS",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": true
+    },
+    {
+      "function": "RC",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": false
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "rule_id": "SURFACE-RISKY-HOSTS",
+      "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems",
+      "severity": "medium",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-001",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "staging.copperline.example",
+          "excerpt": "CT log query found risky_hostnames_count=1: hostname staging.copperline.example, pattern staging, first_seen 2025-03-02, last_seen 2026-09-15; unique_hostnames=12."
+        }
+      ],
+      "deal_impact": "Publicly logged staging hostname suggests a pre-production system may be internet-reachable, increasing attack surface and diligence focus on staging access controls and data segregation; no severity adjustment from baseline.",
+      "remediation": {
+        "summary": "Inventory staging.copperline.example, confirm need for public access, restrict with authentication/VPN or remove, and review staging data and secrets exposure.",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "effort_weeks": 6
+      }
+    }
+  ],
+  "contradictions": [],
+  "remediation_plan": {
+    "items": [
+      {
+        "action": "Inventory staging.copperline.example, confirm need for public access, restrict with authentication/VPN or remove, and review staging data and secrets exposure.",
+        "finding_ids": [
+          "F-001"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "owner_role": "IT Ops"
+      }
+    ],
+    "total_cost_low_usd": 10000,
+    "total_cost_high_usd": 50000
+  },
+  "deal_recommendations": [
+    {
+      "type": "closing_condition",
+      "text": "Require delivery of the current SOC 2 Type II report and a management security interview in Days 0\u201330 before relying on the B rating, consistent with Proceed with conditions.",
+      "basis_ids": [
+        "F-001"
+      ]
+    },
+    {
+      "type": "post_close_covenant",
+      "text": "Require completion in Days 61\u2013100 after close of the staging inventory, access restriction by authentication/VPN or removal, and staging data and secrets review for $10K\u2013$50K [F-001], consistent with Proceed with conditions.",
+      "basis_ids": [
+        "F-001"
+      ]
+    },
+    {
+      "type": "price_adjustment",
+      "text": "Make no price adjustment, as the $10K\u2013$50K remediation total is immaterial relative to the 50M-250M revenue band [F-001], with completion tracked in Days 61\u2013100 under Proceed with conditions.",
+      "basis_ids": [
+        "F-001"
+      ]
+    }
+  ],
+  "narrative": {
+    "executive_summary": "Bottom line: Proceed with conditions \u2014 Copperline Analytics is rated B at 98.4, capped by limited evidence from outside-in signals only.\n\nKey risks: A publicly logged staging hostname points to exposed pre-production access and attack surface [F-001]; no SOC 2 report was provided.\n\nManagement credibility: Not assessed: no management interview provided.\n\nNext steps: Obtain the SOC 2 report and management interview before relying on the rating, and verify staging access controls and data segregation [F-001].",
+    "key_questions_for_management": [
+      "Provide an inventory and access-control record for staging.copperline.example, including authentication and network restrictions [F-001].",
+      "Confirm whether staging.copperline.example requires public access and confirm its data segregation from production [F-001].",
+      "Provide the review of staging data and secrets exposure for staging.copperline.example [F-001].",
+      "Confirm the owner and completion evidence for remediation in Days 61\u2013100 at $10K\u2013$50K [F-001]."
+    ]
+  },
+  "limitations": [
+    "Unassessed CSF functions (no evidence from provided inputs): GV, DE, RC",
+    "Passive outside-in assessment only; no authenticated or internal testing",
+    "KEV matches are product-level; versions not verified",
+    "No SOC 2 report provided",
+    "No management interview provided",
+    "Demo mode: signals from fixtures"
+  ],
+  "trace_ref": "/Users/jjpowell/code/pe-risk-key/eval/runs/dg_6jw6a3gwy462/trace.jsonl"
+}

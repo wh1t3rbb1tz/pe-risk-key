@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Digest validation: JSON Schema plus cross-reference checks (SPEC §9).
 
 Every digest must validate against ``digest.schema.json``. Beyond the

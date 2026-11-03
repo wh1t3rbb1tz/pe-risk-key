@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Orchestrator prompts.
 
 ``FINDING_MAPPING`` holds the finding-mapping rules shared by the agent

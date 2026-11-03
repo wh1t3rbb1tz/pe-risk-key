@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Run the orchestrator agent end to end and print a report.
 
 Makes live API calls unless --demo serves collectors from fixtures;

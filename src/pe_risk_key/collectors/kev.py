@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """match_known_exploited collector: fingerprints vs the CISA KEV catalog.
 
 Offline matching is product-level only: KEV lists products, not affected

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """SOC 2 document analyzer (SPEC §4.2).
 
 One Muse Wonder call extracts the report into a strict schema; code then

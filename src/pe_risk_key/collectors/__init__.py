@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Passive collectors (SPEC §2, §4.1)."""
 
 from pe_risk_key.collectors import (  # noqa: F401

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Narrative engine (SPEC §4.6): IC memo summary, questions, deal recs.
 
 One Muse Wonder call drafts the investment-committee narrative from the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """MCP server (stdio) over saved risk digests.
 
 Read-only: it reads ``eval/runs/*/digest.json`` and never triggers new

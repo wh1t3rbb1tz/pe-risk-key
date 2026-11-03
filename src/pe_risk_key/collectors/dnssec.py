@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """check_dnssec collector: DS record presence via DNS."""
 
 from __future__ import annotations

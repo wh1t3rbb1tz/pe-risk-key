@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Render the synthetic diligence-call fixture to WAV.
 
 Parses fixtures/interviews/brightwater_cto_interview_script.md, renders

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Schema helpers: API-ready subschemas from digest.schema.json.
 
 ``subschema()`` pulls one ``$def`` (e.g. ``finding``) out of

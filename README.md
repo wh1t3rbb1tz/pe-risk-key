@@ -91,3 +91,10 @@ which speaks MCP over stdio.
 - CT log presence doesn’t confirm live hosts;
 - cost bands are triage estimates;
 - DMARC/SPF/DNSSEC reflect the moment of collection.
+
+## License
+
+PE Risk Key is licensed under the GNU Affero General Public License
+v3.0 or later (AGPL-3.0-or-later). If you run a modified version as a
+network service, you must make your source available to its users under
+the same license. Commercial licensing inquiries: open an issue.

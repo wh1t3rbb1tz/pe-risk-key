@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.providers import ModelClient
 from pe_risk_key.schemas import (

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Wonder smoke test: fixture signals -> schema-valid findings.
 
 Loads the Brightwater outside-in fixture, asks Muse Wonder for findings

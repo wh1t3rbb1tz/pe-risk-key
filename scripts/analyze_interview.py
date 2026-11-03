@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Transcribe an interview and extract security claims.
 
 Makes live API calls (transcription + one Muse Wonder call);

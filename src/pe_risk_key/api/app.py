@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -46,7 +47,9 @@ RUNS_DIR = resolve_runs_dir()
 UPLOAD_DIR = ROOT / ".uploads"
 WEB_DIR = ROOT / "web"
 
-AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus"}
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+ALLOWED_UPLOAD_SUFFIXES = frozenset({".pdf", ".md", ".txt", ".wav", ".m4a"})
+UPLOAD_AUDIO_SUFFIXES = frozenset({".wav", ".m4a"})
 REPLAY_MIN_SECONDS = 0.15
 REPLAY_MAX_SECONDS = 3.0
 
@@ -69,6 +72,44 @@ class DigestRequest(BaseModel):
     target_speaker: str | None = None
     as_of: date | None = None
     demo: bool = False
+
+
+_DOMAIN_LABEL_RE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_DOMAIN_FORBIDDEN_CHARS = frozenset("/:@?# \t\r\n")
+
+
+def validate_domain(domain: str) -> str:
+    """Normalize a target domain; reject IPs, URLs, and bad hostnames."""
+    value = (domain or "").strip().rstrip(".").lower()
+    if not value or len(value) > 253:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid domain: {domain!r}."
+        )
+    if any(char in value for char in _DOMAIN_FORBIDDEN_CHARS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid domain (URL or address): {domain!r}.",
+        )
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid domain (IP literal): {domain!r}.",
+        )
+    labels = value.split(".")
+    if not all(_DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid domain: {domain!r}."
+        )
+    if not re.search(r"[A-Za-z]", labels[-1]):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid domain (numeric TLD): {domain!r}.",
+        )
+    return value
 
 
 def _run_dir_or_404(digest_id: str) -> Path:
@@ -141,31 +182,88 @@ def _job_failed(digest_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _sanitize_filename(filename: str) -> str:
+    """Display-only filename: no directories, no control characters."""
+    clean = re.sub(r"[^A-Za-z0-9._-]+", "_", filename or "")
+    clean = clean.strip("._")[:100] or "upload"
+    return clean
+
+
+def _sniff_upload(suffix: str, content: bytes) -> None:
+    """Reject content that does not match its claimed extension."""
+    if not content:
+        raise HTTPException(status_code=400, detail="Upload is empty.")
+    if suffix == ".pdf":
+        if not content.startswith(b"%PDF-"):
+            raise HTTPException(
+                status_code=400,
+                detail="Upload claims .pdf but lacks PDF magic bytes.",
+            )
+    elif suffix == ".wav":
+        if not (
+            len(content) >= 12
+            and content.startswith(b"RIFF")
+            and content[8:12] == b"WAVE"
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Upload claims .wav but lacks a RIFF/WAVE header.",
+            )
+    elif suffix == ".m4a":
+        if not (len(content) >= 8 and content[4:8] == b"ftyp"):
+            raise HTTPException(
+                status_code=400,
+                detail="Upload claims .m4a but lacks an ftyp box.",
+            )
+    elif suffix in (".md", ".txt"):
+        try:
+            content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload claims {suffix} but is not valid UTF-8.",
+            )
+
+
 def _store_upload(filename: str, content: bytes) -> dict[str, str]:
-    """Store bytes under .uploads/<sha256>/; dedupe by sha256."""
+    """Validate and store bytes under .uploads/<sha256>/.
+
+    Rejects oversized, traversal, extension, and content-mismatch
+    uploads. Stored files are named by sha256 (plus the validated
+    extension for downstream dispatch); the user filename is returned
+    sanitized for display only.
+    """
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Upload exceeds the 25 MB limit."
+        )
+    raw = filename or "upload"
+    if "/" in raw or "\\" in raw:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid filename (path separators): {raw!r}.",
+        )
+    suffix = Path(raw).suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Extension {suffix or '(none)'} not allowed; want one of "
+                f"{sorted(ALLOWED_UPLOAD_SUFFIXES)}."
+            ),
+        )
+    _sniff_upload(suffix, content)
     sha256 = hashlib.sha256(content).hexdigest()
     target_dir = UPLOAD_DIR / sha256
-    clean = Path(filename or "upload").name or "upload"
-    if target_dir.is_dir():
-        existing = sorted(
-            path.name for path in target_dir.iterdir() if path.is_file()
-        )
-        if existing:
-            clean = existing[0]
-        else:
-            (target_dir / clean).write_bytes(content)
-    else:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        (target_dir / clean).write_bytes(content)
-    kind = (
-        "interview"
-        if Path(clean).suffix.lower() in AUDIO_SUFFIXES
-        else "document"
-    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    stored = target_dir / f"{sha256}{suffix}"
+    if not stored.exists():
+        stored.write_bytes(content)
+    kind = "interview" if suffix in UPLOAD_AUDIO_SUFFIXES else "document"
     return {
         "upload_id": sha256,
         "sha256": sha256,
-        "filename": clean,
+        "filename": _sanitize_filename(raw),
         "kind": kind,
     }
 
@@ -239,7 +337,7 @@ def _event_ts(event: dict[str, Any]) -> float:
 def create_digest(body: DigestRequest) -> dict[str, str]:
     """Start a digest run in a background thread; returns its id."""
     kwargs: dict[str, Any] = {
-        "domain": body.domain,
+        "domain": validate_domain(body.domain),
         "company_name": body.company,
         "employee_band": body.employee_band,
         "revenue_band": body.revenue_band,
@@ -269,7 +367,12 @@ def create_digest(body: DigestRequest) -> dict[str, str]:
 @app.post("/api/uploads")
 async def upload_file(file: UploadFile = File(...)) -> dict[str, str]:
     """Store an upload content-addressed; dedupes by sha256."""
-    return _store_upload(file.filename or "upload", await file.read())
+    body = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(body) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413, detail="Upload exceeds the 25 MB limit."
+        )
+    return _store_upload(file.filename or "upload", body)
 
 
 def _mark_authoritative(runs: list[dict[str, Any]]) -> None:

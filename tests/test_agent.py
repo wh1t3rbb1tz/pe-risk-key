@@ -346,6 +346,54 @@ def test_kev_uses_cached_web_posture(agent_env, monkeypatch):
     )
 
 
+def test_concurrent_posture_and_kev_execute_posture_once(
+    monkeypatch, tmp_path
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    calls: list = []
+    lock = threading.Lock()
+
+    def fake_run(tool_name, domain, **kwargs):
+        if tool_name == "check_web_posture":
+            with lock:
+                calls.append(tool_name)
+            time.sleep(0.2)
+            return {
+                "status": "ok",
+                "collection_method": "single_https_get",
+                "hosts": [],
+            }
+        return {
+            "status": "ok",
+            "collection_method": "ct_log_query",
+            "matches": [],
+            "matches_count": 0,
+        }
+
+    monkeypatch.setattr(agent_context, "registry_run", fake_run)
+    ctx = agent_context.RunContext(
+        digest_id="dg_concurrent01",
+        domain=DOMAIN,
+        company_name="Acme",
+        aliases=[],
+        run_dir=tmp_path,
+    )
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(
+            pool.map(
+                lambda call: call(),
+                [
+                    lambda: ctx.run_tool("check_web_posture", {}, 1),
+                    lambda: ctx.run_tool("check_web_posture", {}, 1),
+                    lambda: ctx.run_tool("match_known_exploited", {}, 1),
+                ],
+            )
+        )
+    assert calls == ["check_web_posture"]
+    assert all(result["status"] == "ok" for result in results)
+
+
 def test_coverage_gap_triggers_missing_collectors_and_resubmission(
     agent_env, monkeypatch
 ):

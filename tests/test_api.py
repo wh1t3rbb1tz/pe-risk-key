@@ -95,19 +95,88 @@ def test_upload_stores_and_dedupes(client, api_env):
         "filename": "report.pdf",
         "kind": "document",
     }
-    assert (api_env / "uploads" / sha / "report.pdf").read_bytes() == content
+    stored = api_env / "uploads" / sha / f"{sha}.pdf"
+    assert stored.read_bytes() == content
     second = client.post(
         "/api/uploads", files={"file": ("other.pdf", content)}
     )
     assert second.json()["upload_id"] == sha
-    assert second.json()["filename"] == "report.pdf"
+    assert second.json()["filename"] == "other.pdf"
     assert sorted(
         path.name for path in (api_env / "uploads" / sha).iterdir()
-    ) == ["report.pdf"]
+    ) == [f"{sha}.pdf"]
     audio = client.post(
-        "/api/uploads", files={"file": ("iv.wav", b"RIFF-data")}
+        "/api/uploads",
+        files={"file": ("iv.wav", b"RIFF\x24\x00\x00\x00WAVEfmt ")},
     )
     assert audio.json()["kind"] == "interview"
+
+
+def test_upload_rejects_oversize(client, api_env, monkeypatch):
+    monkeypatch.setattr(api, "MAX_UPLOAD_BYTES", 10)
+    response = client.post(
+        "/api/uploads", files={"file": ("big.pdf", b"%PDF-" + b"x" * 7)}
+    )
+    assert response.status_code == 413
+    with pytest.raises(Exception, match="25 MB"):
+        api._store_upload("big.pdf", b"x" * (api.MAX_UPLOAD_BYTES + 1))
+
+
+def test_upload_rejects_bad_extension(client):
+    response = client.post(
+        "/api/uploads", files={"file": ("run.exe", b"MZ-bytes")}
+    )
+    assert response.status_code == 400
+    assert "not allowed" in response.json()["detail"]
+    response = client.post(
+        "/api/uploads", files={"file": ("noext", b"data")}
+    )
+    assert response.status_code == 400
+
+
+def test_upload_rejects_content_mismatch(client):
+    cases = [
+        ("fake.pdf", b"not a pdf at all"),
+        ("fake.wav", b"RIFF-data"),
+        ("fake.wav", b"too short"),
+        ("fake.m4a", b"not an mp4 file...."),
+        ("fake.md", b"\xff\xfe binary \x00"),
+        ("empty.txt", b""),
+    ]
+    for filename, content in cases:
+        response = client.post(
+            "/api/uploads", files={"file": (filename, content)}
+        )
+        assert response.status_code == 400, filename
+
+
+def test_upload_rejects_path_traversal(client, api_env):
+    for filename in (
+        "../../etc/evil.pdf",
+        "..\\..\\evil.pdf",
+        "/abs/path/evil.pdf",
+        "sub/dir/evil.pdf",
+    ):
+        response = client.post(
+            "/api/uploads",
+            files={"file": (filename, b"%PDF-traversal")},
+        )
+        assert response.status_code == 400, filename
+    stray = [
+        path
+        for path in (api_env / "uploads").rglob("*")
+        if path.is_file()
+    ]
+    assert stray == []
+
+
+def test_upload_sanitizes_display_name(client):
+    response = client.post(
+        "/api/uploads",
+        files={"file": ("my report (final)!?.pdf", b"%PDF-bytes")},
+    )
+    assert response.status_code == 200
+    assert response.json()["filename"] == "my_report_final_.pdf"
 
 
 def test_post_starts_run_and_file_appears(client, api_env, monkeypatch):
@@ -140,7 +209,47 @@ def test_post_starts_run_and_file_appears(client, api_env, monkeypatch):
     while not (api_env / "runs" / digest_id / "digest.json").exists():
         assert time.time() < deadline
         time.sleep(0.05)
-    assert captured["soc2_path"].name == "soc2.md"
+    assert captured["soc2_path"].name == (
+        f"{upload.json()['upload_id']}.md"
+    )
+
+
+def test_post_validates_domains(client, monkeypatch):
+    seen: list[str] = []
+    started = threading.Event()
+
+    def fake_run_digest(**kwargs):
+        seen.append(kwargs["domain"])
+        started.set()
+
+    monkeypatch.setattr(api, "run_digest", fake_run_digest)
+    assert (
+        client.post(
+            "/api/digests", json=_post_body(domain="Acme.Example.")
+        ).status_code
+        == 202
+    )
+    assert started.wait(5)
+    assert seen == ["acme.example"]
+    for bad in (
+        "1.2.3.4",
+        "::1",
+        "http://acme.example/",
+        "acme.example/path",
+        "acme.example:8080",
+        "not a domain",
+        "-bad.example",
+        "bad-.example",
+        f"{'a' * 64}.example",
+        "example.123",
+        "12345",
+        "",
+    ):
+        response = client.post(
+            "/api/digests", json=_post_body(domain=bad)
+        )
+        assert response.status_code == 400, bad
+    assert seen == ["acme.example"]
 
 
 def test_post_rejects_unknown_upload(client):
@@ -305,6 +414,19 @@ def test_app_js_selectors_are_native():
     assert selectors, "no selectors found in app.js"
     bad = [s for s in selectors if "!=" in s]
     assert not bad, f"non-native selectors: {bad}"
+
+
+def test_dashboard_safety_and_provenance_strings():
+    web_dir = Path(api.__file__).resolve().parents[3] / "web"
+    html = (web_dir / "index.html").read_text(encoding="utf-8")
+    assert 'id="live-note"' in html
+    assert "passive collection will contact" in html
+    assert "apex/www hosts" in html
+    js = (web_dir / "app.js").read_text(encoding="utf-8")
+    assert "updateLiveNote" in js
+    assert "Built Oct 27 – Nov 4, 2026" in js
+    assert "Meta Global AI Developer Hackathon" in js
+    assert "https://github.com/wh1t3rbb1tz/pe-risk-key" in js
 
 
 def _complete_digest(digest_id, generated_at, summary="Bottom line: fine."):

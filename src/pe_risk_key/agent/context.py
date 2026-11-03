@@ -9,6 +9,7 @@ import random
 import string
 import threading
 import time
+from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,8 @@ class RunContext:
         self.outputs: dict[str, dict] = {}
         self.trace = TraceWriter(run_dir / "trace.jsonl")
         self._params = _tool_params()
+        self._posture_lock = threading.Lock()
+        self._posture_future: Future | None = None
         begin_run(domain)
 
     def run_tool(
@@ -113,7 +116,12 @@ class RunContext:
         )
         started = time.monotonic()
         try:
-            output = self._execute(tool_name, args or {}, parallel_group)
+            if tool_name == "check_web_posture":
+                output = self._shared_posture()
+            else:
+                output = self._execute(
+                    tool_name, args or {}, parallel_group
+                )
             status = output.get("status", "ok")
         except Exception as exc:  # never let one tool kill the run
             output = {
@@ -154,15 +162,42 @@ class RunContext:
             return self._run_kev(parallel_group)
         return registry_run(tool_name, self.domain, **call_args)
 
-    def _run_kev(self, parallel_group: int) -> dict:
-        """KEV matching over cached web-posture fingerprints.
+    def _shared_posture(self) -> dict:
+        """One web-posture execution per run; callers share the future.
 
-        Runs web posture through this context first when absent, so the
-        result is cached; either way no host is fetched twice.
+        Concurrent posture and KEV calls in one parallel group used to
+        race: KEV sometimes chained a duplicate posture fetch (which
+        then hit the per-host request limit). Now the first caller
+        executes and the rest wait on its future.
         """
-        posture = self.outputs.get("check_web_posture")
-        if posture is None:
-            posture = self.run_tool("check_web_posture", {}, parallel_group)
+        with self._posture_lock:
+            future = self._posture_future
+            if future is None:
+                future = Future()
+                self._posture_future = future
+                owner = True
+            else:
+                owner = False
+        if not owner:
+            return future.result()
+        try:
+            output = registry_run("check_web_posture", self.domain)
+        except Exception as exc:
+            future.set_exception(exc)
+            raise
+        future.set_result(output)
+        return output
+
+    def _run_kev(self, parallel_group: int) -> dict:
+        """KEV matching over shared web-posture fingerprints.
+
+        Posture always routes through this context (traced, executed
+        once per run), so KEV never fetches a host twice and concurrent
+        calls cannot duplicate the work.
+        """
+        posture = self.run_tool(
+            "check_web_posture", {}, parallel_group
+        )
         fingerprints = _fingerprints_for_kev(posture)
         return registry_run(
             "match_known_exploited", self.domain, fingerprints=fingerprints

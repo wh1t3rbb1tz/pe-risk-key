@@ -127,6 +127,11 @@ _DECISION_DANGLING_PREP_RE = re.compile(
     re.IGNORECASE,
 )
 _DECISION_AFTER_CITE_RE = re.compile(r"^(?:\s*\[[FC]-\d{3}\])*\s*")
+_SIGNAL_RESTATED_LE_RE = re.compile(
+    r"\b(consistent with|in line with|supporting|aligned with|"
+    r"reflecting|in keeping with|under|per)\b"
+)
+_DEAL_KEYWORD_STOPWORDS = frozenset({"with"})
 _REPAIR_TOKEN_LABELS = {
     **DEAL_SIGNAL_LABELS,
     **WINDOW_LABELS,
@@ -552,11 +557,16 @@ def validate_narrative(
     has_interview: bool = True,
     has_soc2: bool = True,
     finding_count: int | None = None,
+    deal_label: str = "",
 ) -> list[str]:
     """Human-readable validation errors; empty means valid."""
     errors: list[str] = []
     if not isinstance(output, dict):
         return ["narrative output is not an object."]
+    deal_keywords = [
+        re.compile(r"\b" + re.escape(word) + r"\b")
+        for word in _deal_keywords(deal_label)
+    ]
     count = len(finding_ids) if finding_count is None else finding_count
     short = count <= SHORT_EVIDENCE_FINDINGS
     max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
@@ -678,6 +688,15 @@ def validate_narrative(
                     f"{label} starts with its own type label; lead with "
                     "the substance instead."
                 )
+        if isinstance(text, str) and deal_keywords:
+            tail = re.split(r"[,;]", text)[-1].strip().lower()
+            if _SIGNAL_RESTATED_LE_RE.search(
+                tail
+            ) and any(expr.search(tail) for expr in deal_keywords):
+                errors.append(
+                    f"{label} ends by restating the deal signal "
+                    f"({tail[:80]!r}); fold it into the substance instead."
+                )
         basis = rec.get("basis_ids")
         if not isinstance(basis, list) or not basis:
             errors.append(f"{label} has no basis_ids.")
@@ -738,6 +757,15 @@ def validate_narrative(
             "use one-decimal scores."
         )
     return errors
+
+
+def _deal_keywords(deal_label: str) -> set[str]:
+    """Distinctive words of the decision label (stopwords dropped)."""
+    return {
+        word
+        for word in re.findall(r"[a-z]+", (deal_label or "").lower())
+        if len(word) >= 4
+    } - _DEAL_KEYWORD_STOPWORDS
 
 
 def _decision_phrases(deal_label: str) -> list[str]:
@@ -1088,6 +1116,7 @@ def generate_narrative(
                 contradiction_verdicts=contradiction_verdicts,
                 has_interview=has_interview,
                 has_soc2=has_soc2,
+                deal_label=deal_label,
             ),
         )
 

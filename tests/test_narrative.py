@@ -890,6 +890,63 @@ def test_decision_in_prompt_not_in_labeled_input(narrative_env):
     assert "must not be restated in any recommendation" in system
 
 
+def test_trailing_signal_restatement_flagged():
+    output = _good_output()
+    output["deal_recommendations"][0]["text"] = (
+        "Require the fix in Days 31-60 [F-001], consistent with the "
+        "escalate decision."
+    )
+    errors = validate_narrative(
+        output,
+        **_validate_ids(),
+        deal_label="Escalate: full cyber diligence required before signing",
+    )
+    assert any(
+        "ends by restating the deal signal" in error for error in errors
+    )
+    output["deal_recommendations"][0]["text"] = (
+        "No adjustment is warranted under Proceed with conditions."
+    )
+    errors = validate_narrative(
+        output, **_validate_ids(), deal_label="Proceed with conditions"
+    )
+    assert any(
+        "ends by restating the deal signal" in error for error in errors
+    )
+
+
+def test_trailing_signal_check_ignores_clean_text():
+    output = _good_output()
+    output["deal_recommendations"][0]["text"] = (
+        "Confirm insurability and likely underwriting requirements "
+        "before close [F-001]."
+    )
+    errors = validate_narrative(
+        output,
+        **_validate_ids(),
+        deal_label="Escalate: full cyber diligence required before signing",
+    )
+    assert errors == []
+    assert (
+        validate_narrative(_good_output(), **_validate_ids()) == []
+    )
+
+
+def test_trailing_signal_restatement_regenerates(narrative_env):
+    bad = _good_output()
+    bad["deal_recommendations"][0]["text"] = (
+        "Require the fix [F-001], consistent with the proceed decision."
+    )
+    narrative_env.outputs = [bad, _good_output()]
+    result = generate_narrative(_payload())
+    assert result["regenerated"] is True
+    assert result["valid"] is True
+    assert any(
+        "ends by restating the deal signal" in error
+        for error in result["first_attempt_errors"]
+    )
+
+
 def test_two_decimal_score_flagged():
     output = _good_output()
     output["executive_summary"] = (

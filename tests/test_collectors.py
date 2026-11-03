@@ -1647,3 +1647,18 @@ def test_incidents_demo_mode_returns_fixture(monkeypatch):
     assert out == copper["search_public_incidents"]
     assert out["results"] == []
     assert out["disclosed_within_months"] is None
+
+
+def test_suite_blocks_real_network():
+    import socket
+
+    from conftest import NetworkBlockedError
+
+    with pytest.raises(NetworkBlockedError):
+        socket.create_connection(("example.com", 443), timeout=1)
+    with pytest.raises(NetworkBlockedError):
+        socket.socket().connect(("8.8.8.8", 53))
+    with pytest.raises(NetworkBlockedError):
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(
+            b"hi", ("8.8.8.8", 53)
+        )

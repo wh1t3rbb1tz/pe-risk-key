@@ -1,0 +1,31 @@
+{
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "rule_id": "SURFACE-RISKY-HOSTS",
+      "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems",
+      "severity": "medium",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-001",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "staging.copperline.example",
+          "excerpt": "CT logs list risky hostname staging.copperline.example with pattern \"staging\", first_seen 2025-03-02, last_seen 2026-09-15; risky_hostnames_count=1, unique_hostnames=12."
+        }
+      ],
+      "deal_impact": "A publicly logged staging hostname suggests a non-production system may be internet-reachable with weaker controls; requires pre-close validation of exposure and segmentation. No severity adjustment from baseline.",
+      "remediation": {
+        "summary": "Verify staging.copperline.example is not publicly accessible or is authenticated, segmented, and decommissioned if unused; inventory all CT-visible hosts.",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "effort_weeks": 6
+      }
+    }
+  ]
+}

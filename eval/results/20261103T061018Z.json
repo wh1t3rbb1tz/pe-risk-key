@@ -1,0 +1,365 @@
+{
+  "date": "2026-11-03",
+  "started_at": "2026-11-03T06:10:18.485592+00:00",
+  "models": [
+    "muse-wonder-1.0"
+  ],
+  "total_runs": 5,
+  "targets": {
+    "brightwaterfleet.example": {
+      "runs": [
+        {
+          "digest_id": "dg_tb9lwo1st8o7",
+          "schema_valid": true,
+          "schema_errors": [],
+          "findings": {
+            "recall": 1.0,
+            "precision": 1.0,
+            "matched": 15,
+            "total_expected": 15,
+            "total_findings": 15,
+            "missing": [],
+            "unexpected": [],
+            "severity_exact": 15,
+            "must_not_find_hits": []
+          },
+          "contradictions": {
+            "recall": 1.0,
+            "accuracy": 1.0,
+            "matched": 9,
+            "correct": 9,
+            "total_expected": 9,
+            "misses": [],
+            "wrong": []
+          },
+          "narrative_valid": true,
+          "narrative_attempts": 2,
+          "profile": {
+            "rating_match": true,
+            "rating_want": "D",
+            "rating_got": "D",
+            "caps_match": true,
+            "caps_want": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "caps_got": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "confidence_match": true,
+            "confidence_want": "high",
+            "confidence_got": "high",
+            "deal_signal_match": true,
+            "deal_signal_want": "escalate_full_diligence",
+            "deal_signal_got": "escalate_full_diligence",
+            "profile_match": true
+          },
+          "score": 56.82,
+          "models": [
+            "muse-wonder-1.0"
+          ],
+          "cost_usd": 0.485484,
+          "deterministic_scoring": true,
+          "status": "ok",
+          "wall_seconds": 83.90179079200607
+        },
+        {
+          "digest_id": "dg_3tp9o3lhhif7",
+          "schema_valid": true,
+          "schema_errors": [],
+          "findings": {
+            "recall": 1.0,
+            "precision": 1.0,
+            "matched": 15,
+            "total_expected": 15,
+            "total_findings": 15,
+            "missing": [],
+            "unexpected": [],
+            "severity_exact": 15,
+            "must_not_find_hits": []
+          },
+          "contradictions": {
+            "recall": 1.0,
+            "accuracy": 1.0,
+            "matched": 9,
+            "correct": 9,
+            "total_expected": 9,
+            "misses": [],
+            "wrong": []
+          },
+          "narrative_valid": false,
+          "narrative_attempts": 2,
+          "profile": {
+            "rating_match": true,
+            "rating_want": "D",
+            "rating_got": "D",
+            "caps_match": true,
+            "caps_want": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "caps_got": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "confidence_match": true,
+            "confidence_want": "high",
+            "confidence_got": "high",
+            "deal_signal_match": true,
+            "deal_signal_want": "escalate_full_diligence",
+            "deal_signal_got": "escalate_full_diligence",
+            "profile_match": true
+          },
+          "score": 57.27,
+          "models": [
+            "muse-wonder-1.0"
+          ],
+          "cost_usd": 0.4466812,
+          "deterministic_scoring": true,
+          "status": "ok",
+          "wall_seconds": 67.88302487501642
+        },
+        {
+          "digest_id": "dg_ea8uqhzdk6f5",
+          "schema_valid": true,
+          "schema_errors": [],
+          "findings": {
+            "recall": 1.0,
+            "precision": 0.9375,
+            "matched": 15,
+            "total_expected": 15,
+            "total_findings": 16,
+            "missing": [],
+            "unexpected": [
+              "SOC2-EXCEPTION-VENDOR"
+            ],
+            "severity_exact": 15,
+            "must_not_find_hits": [
+              "SOC2-EXCEPTION-VENDOR"
+            ]
+          },
+          "contradictions": {
+            "recall": 1.0,
+            "accuracy": 1.0,
+            "matched": 9,
+            "correct": 9,
+            "total_expected": 9,
+            "misses": [],
+            "wrong": []
+          },
+          "narrative_valid": false,
+          "narrative_attempts": 2,
+          "profile": {
+            "rating_match": true,
+            "rating_want": "D",
+            "rating_got": "D",
+            "caps_match": true,
+            "caps_want": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "caps_got": [
+              "CAP-CONTRADICTION",
+              "CAP-CRIT",
+              "CAP-INCIDENT"
+            ],
+            "confidence_match": true,
+            "confidence_want": "high",
+            "confidence_got": "high",
+            "deal_signal_match": true,
+            "deal_signal_want": "escalate_full_diligence",
+            "deal_signal_got": "escalate_full_diligence",
+            "profile_match": true
+          },
+          "score": 55.46,
+          "models": [
+            "muse-wonder-1.0"
+          ],
+          "cost_usd": 0.4664942,
+          "deterministic_scoring": true,
+          "status": "ok",
+          "wall_seconds": 78.30542449996574
+        }
+      ],
+      "aggregate": {
+        "runs": 3,
+        "failed": 0,
+        "finding_recall_mean": 1.0,
+        "finding_recall_min": 1.0,
+        "finding_precision_mean": 0.9791666666666666,
+        "finding_precision_min": 0.9375,
+        "contradiction_recall_mean": 1.0,
+        "contradiction_recall_min": 1.0,
+        "verdict_accuracy_mean": 1.0,
+        "verdict_accuracy_min": 1.0,
+        "schema_pass_rate": 1.0,
+        "narrative_pass_rate": 0.3333333333333333,
+        "rating_match_fraction": 1.0,
+        "profile_match_fraction": 1.0,
+        "score_mean": 56.51666666666667,
+        "score_variance": 0.5920222222222232,
+        "determinism_fraction": 1.0,
+        "total_cost_usd": 1.3986594
+      }
+    },
+    "copperline.example": {
+      "runs": [
+        {
+          "digest_id": "dg_o7wjrz52pwph",
+          "schema_valid": true,
+          "schema_errors": [],
+          "findings": {
+            "recall": 1.0,
+            "precision": 1.0,
+            "matched": 1,
+            "total_expected": 1,
+            "total_findings": 1,
+            "missing": [],
+            "unexpected": [],
+            "severity_exact": 1,
+            "must_not_find_hits": []
+          },
+          "contradictions": {
+            "recall": null,
+            "accuracy": null,
+            "matched": 0,
+            "correct": 0,
+            "total_expected": 0,
+            "misses": [],
+            "wrong": []
+          },
+          "narrative_valid": true,
+          "narrative_attempts": 2,
+          "profile": {
+            "rating_match": true,
+            "rating_want": "B",
+            "rating_got": "B",
+            "caps_match": true,
+            "caps_want": [
+              "CAP-LOW-COVERAGE"
+            ],
+            "caps_got": [
+              "CAP-LOW-COVERAGE"
+            ],
+            "confidence_match": true,
+            "confidence_want": "low",
+            "confidence_got": "low",
+            "deal_signal_match": true,
+            "deal_signal_want": "proceed_with_conditions",
+            "deal_signal_got": "proceed_with_conditions",
+            "profile_match": true
+          },
+          "score": 98.3636,
+          "models": [
+            "muse-wonder-1.0"
+          ],
+          "cost_usd": 0.1768424,
+          "deterministic_scoring": true,
+          "status": "ok",
+          "wall_seconds": 47.41812954097986
+        },
+        {
+          "digest_id": "dg_otkdxvho44we",
+          "schema_valid": true,
+          "schema_errors": [],
+          "findings": {
+            "recall": 1.0,
+            "precision": 1.0,
+            "matched": 1,
+            "total_expected": 1,
+            "total_findings": 1,
+            "missing": [],
+            "unexpected": [],
+            "severity_exact": 1,
+            "must_not_find_hits": []
+          },
+          "contradictions": {
+            "recall": null,
+            "accuracy": null,
+            "matched": 0,
+            "correct": 0,
+            "total_expected": 0,
+            "misses": [],
+            "wrong": []
+          },
+          "narrative_valid": false,
+          "narrative_attempts": 2,
+          "profile": {
+            "rating_match": true,
+            "rating_want": "B",
+            "rating_got": "B",
+            "caps_match": true,
+            "caps_want": [
+              "CAP-LOW-COVERAGE"
+            ],
+            "caps_got": [
+              "CAP-LOW-COVERAGE"
+            ],
+            "confidence_match": true,
+            "confidence_want": "low",
+            "confidence_got": "low",
+            "deal_signal_match": true,
+            "deal_signal_want": "proceed_with_conditions",
+            "deal_signal_got": "proceed_with_conditions",
+            "profile_match": true
+          },
+          "score": 98.3636,
+          "models": [
+            "muse-wonder-1.0"
+          ],
+          "cost_usd": 0.1656108,
+          "deterministic_scoring": true,
+          "status": "ok",
+          "wall_seconds": 53.419553041982
+        }
+      ],
+      "aggregate": {
+        "runs": 2,
+        "failed": 0,
+        "finding_recall_mean": 1.0,
+        "finding_recall_min": 1.0,
+        "finding_precision_mean": 1.0,
+        "finding_precision_min": 1.0,
+        "contradiction_recall_mean": null,
+        "contradiction_recall_min": null,
+        "verdict_accuracy_mean": null,
+        "verdict_accuracy_min": null,
+        "schema_pass_rate": 1.0,
+        "narrative_pass_rate": 0.5,
+        "rating_match_fraction": 1.0,
+        "profile_match_fraction": 1.0,
+        "score_mean": 98.3636,
+        "score_variance": 0.0,
+        "determinism_fraction": 1.0,
+        "total_cost_usd": 0.3424532
+      }
+    }
+  },
+  "aggregate": {
+    "runs": 5,
+    "failed": 0,
+    "finding_recall_mean": 1.0,
+    "finding_recall_min": 1.0,
+    "finding_precision_mean": 0.9875,
+    "finding_precision_min": 0.9375,
+    "contradiction_recall_mean": 1.0,
+    "contradiction_recall_min": 1.0,
+    "verdict_accuracy_mean": 1.0,
+    "verdict_accuracy_min": 1.0,
+    "schema_pass_rate": 1.0,
+    "narrative_pass_rate": 0.4,
+    "rating_match_fraction": 1.0,
+    "profile_match_fraction": 1.0,
+    "score_mean": 73.25544,
+    "score_variance": 420.63501239040005,
+    "determinism_fraction": 1.0,
+    "total_cost_usd": 1.7411126000000001
+  },
+  "total_cost_usd": 1.7411126000000001
+}

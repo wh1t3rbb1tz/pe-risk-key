@@ -76,6 +76,7 @@ class SOC2Result:
     dropped_unquoted: list[dict[str, Any]] = field(default_factory=list)
     dropped_no_locator: list[dict[str, Any]] = field(default_factory=list)
     dropped_evidence_keys: list[str] = field(default_factory=list)
+    reclassified: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     estimated_cost_usd: float = 0.0
 
@@ -211,6 +212,70 @@ def _derive_criteria(exceptions: list[dict]) -> None:
                 item["control_ref"] = candidate.strip()
             item["control_id"] = criterion
             break
+
+
+_CLEAN_RESULT_RE = re.compile(r"no exceptions? noted")
+_EXCEPTION_RESULT_RE = re.compile(r"exception noted|deviation")
+
+
+def _result_text_indicates_clean(quote: Any) -> bool:
+    """True when verified result text states no exception was found."""
+    text = normalize_quote(quote if isinstance(quote, str) else "")
+    return bool(_CLEAN_RESULT_RE.search(text)) and not (
+        _EXCEPTION_RESULT_RE.search(text)
+    )
+
+
+def _reclassify_clean(
+    exceptions: list[dict], controls_tested: list[dict]
+) -> list[dict[str, Any]]:
+    """Move exception items with clean result text to no_exception.
+
+    Judges every exception-labeled item by its own verified quote; on
+    disagreement the result text wins. Reclassified exceptions leave
+    the exceptions list and gain a no_exception tested row (unless one
+    already exists for the control_ref, which is the cross-check).
+    Returns [{control_ref, criterion}] for the soc2_reclassified trace.
+    """
+    reclassified: list[dict[str, Any]] = []
+    clean_refs = {
+        tested.get("control_ref")
+        for tested in controls_tested
+        if tested.get("result") == "no_exception"
+    }
+    kept = []
+    for item in exceptions:
+        if not _result_text_indicates_clean(item.get("quote")):
+            kept.append(item)
+            continue
+        ref = item.get("control_ref") or item.get("control_id")
+        criterion = item.get("control_id")
+        reclassified.append({"control_ref": ref, "criterion": criterion})
+        if ref not in clean_refs:
+            controls_tested.append(
+                {
+                    "control_ref": ref,
+                    "criterion": criterion,
+                    "description": item.get("description", ""),
+                    "result": "no_exception",
+                    "quote": item.get("quote"),
+                    "locator": item.get("locator"),
+                }
+            )
+            clean_refs.add(ref)
+    exceptions[:] = kept
+    for tested in controls_tested:
+        if tested.get("result") == "exception" and (
+            _result_text_indicates_clean(tested.get("quote"))
+        ):
+            tested["result"] = "no_exception"
+            reclassified.append(
+                {
+                    "control_ref": tested.get("control_ref"),
+                    "criterion": tested.get("criterion"),
+                }
+            )
+    return reclassified
 
 
 def _ground_counts(exceptions: list[dict]) -> None:
@@ -369,6 +434,7 @@ def analyze_soc2(
     )
     dropped_no_locator.extend(no_loc)
     _ground_counts(exceptions)
+    reclassified = _reclassify_clean(exceptions, controls_tested)
 
     opinion_quote, opinion_diagnostics = verify_quote(
         extraction.get("opinion_quote"), normalized_source
@@ -631,6 +697,7 @@ def analyze_soc2(
         dropped_unquoted=dropped_unquoted,
         dropped_no_locator=dropped_no_locator,
         dropped_evidence_keys=sorted(dropped_evidence_keys),
+        reclassified=reclassified,
         usage=usage,
         estimated_cost_usd=_analyze_cost_usd(usage),
     )

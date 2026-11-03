@@ -981,6 +981,65 @@ def test_soc2_digest_validates_and_confidence_medium(
     assert "No management interview provided" in digest["limitations"]
 
 
+def test_soc2_reclassified_traced(agent_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    extraction = _soc2_extraction()
+    extraction["exceptions"].append(
+        {
+            "control_id": "CC9.2",
+            "control_ref": "CC9.2-01",
+            "description": "Vendor reviews.",
+            "auditor_test": "Inspected vendor reviews.",
+            "deviations": None,
+            "sample_size": None,
+            "management_response": "None.",
+            "locator": "Section IV, CC9.2-01",
+            "quote": "No exceptions noted.",
+            "deal_impact": "None.",
+        }
+    )
+    _ScriptedSoc2Client.extraction = extraction
+    _ScriptedSoc2Client.calls = []
+    monkeypatch.setattr(soc2_module, "ModelClient", _ScriptedSoc2Client)
+    agent_env.turns = [
+        {
+            "content": "Plan: quick check.",
+            "tool_calls": [{"name": "check_dnssec", "arguments": {}}],
+        },
+        {"content": "Submitting.", "tool_calls": [_submit(_finding())]},
+        {
+            "content": "Resubmitting.",
+            "tool_calls": [_submit(_finding())],
+        },
+    ]
+    report = tmp_path / "acme_soc2.md"
+    report.write_text(
+        _SOC2_REPORT_TEXT + "CC9.2-01 Vendor reviews. No exceptions noted.\n",
+        encoding="utf-8",
+    )
+    result = run_digest(
+        DOMAIN, "Acme", "201-1000", "50M-250M",
+        soc2_path=report, as_of="2026-10-30",
+    )
+    trace = _read_trace(result)
+    events = [e for e in trace if e["type"] == "soc2_reclassified"]
+    assert len(events) == 1
+    assert events[0]["items"] == [
+        {"control_ref": "CC9.2-01", "criterion": "CC9.2"}
+    ]
+    digest = _read_digest(result)
+    assert "SOC2-EXCEPTION-VENDOR" not in [
+        finding.get("rule_id") for finding in digest["findings"]
+    ]
+
+
 def test_soc2_trace_events(agent_env, monkeypatch, tmp_path):
     result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
     trace = _read_trace(result)
@@ -1480,28 +1539,40 @@ def _run_narrative_digest(agent_env, monkeypatch, outputs):
 
 def _narrative_output():
     return {
-        "executive_summary": (
-            "Bottom line: rating B with no material gap [F-001]. "
-            "Key risks: one low finding. "
-            "Management credibility: Not assessed: no management "
-            "interview provided. "
-            "Next steps: proceed; no SOC 2 report was provided."
-        ),
+        "bottom_line": {
+            "text": "Proceed with conditions. Rating B with no material gap.",
+            "basis_ids": ["F-001"],
+        },
+        "key_risks": {
+            "text": "One low finding.",
+            "basis_ids": ["F-001"],
+        },
+        "management_credibility": {"text": ""},
+        "next_steps": {
+            "text": "Proceed; no SOC 2 report was provided.",
+            "basis_ids": ["F-001"],
+        },
         "key_questions_for_management": [
-            f"Question {index} about controls [F-001]?"
-            for index in range(4)
+            {
+                "text": "Confirm control status?",
+                "basis_ids": ["F-001"],
+            },
+            {
+                "text": "Confirm the remediation timeline?",
+                "basis_ids": ["F-001"],
+            },
+            {
+                "text": "Reconcile the claim with test evidence?",
+                "basis_ids": ["F-001"],
+            },
+            {
+                "text": "Provide the enforcement evidence?",
+                "basis_ids": ["F-001"],
+            },
         ],
         "deal_recommendations": [
-            {
-                "type": "closing_condition",
-                "text": "Require the fix in Days 31-60.",
-                "basis_ids": ["F-001"],
-            },
-            {
-                "type": "price_adjustment",
-                "text": "No adjustment warranted.",
-                "basis_ids": ["F-001"],
-            },
+            {"text": "Require the fix in Days 31-60."},
+            {"text": "No adjustment warranted."},
         ],
     }
 
@@ -1533,13 +1604,13 @@ def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
 
 def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
     bad = _narrative_output()
-    bad["executive_summary"] = "There is a major exposure."
-    bad["deal_recommendations"][0]["basis_ids"] = ["F-999"]
+    bad["bottom_line"]["basis_ids"] = ["F-999"]
     result = _run_narrative_digest(agent_env, monkeypatch, [bad, bad])
     digest = _read_digest(result)
     assert validate_digest(digest) == []
     assert [r["type"] for r in digest["deal_recommendations"]] == [
-        "price_adjustment"
+        "closing_condition",
+        "price_adjustment",
     ]
     assert "narrative validation incomplete" in digest["limitations"]
     trace = _read_trace(result)
@@ -1547,7 +1618,7 @@ def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
     assert complete[0]["valid"] is False
     failed = [e for e in trace if e["type"] == "narrative_validation_failed"]
     assert len(failed) == 1
-    assert any("exposure" in e or "F-999" in e for e in failed[0]["errors"])
+    assert any("F-999" in e for e in failed[0]["errors"])
 
 
 def test_preview_final_events_and_narrative_attempts(
@@ -1584,7 +1655,7 @@ def test_narrative_repaired_traced_without_regeneration(
 ):
     output = _narrative_output()
     output["deal_recommendations"][0]["text"] = (
-        "Require the fix in Days 31-60 [F-001], consistent with Proceed "
+        "Require the fix in Days 31-60, consistent with Proceed "
         "with conditions."
     )
     result = _run_narrative_digest(agent_env, monkeypatch, [output])
@@ -1606,7 +1677,7 @@ def test_narrative_second_attempt_reports_first_errors(
     agent_env, monkeypatch
 ):
     bad = _narrative_output()
-    bad["executive_summary"] = "There is a major exposure."
+    bad["bottom_line"]["basis_ids"] = ["F-999"]
     result = _run_narrative_digest(
         agent_env, monkeypatch, [bad, _narrative_output()]
     )
@@ -1616,7 +1687,7 @@ def test_narrative_second_attempt_reports_first_errors(
     ]
     assert complete["attempts"] == 2
     assert any(
-        "exposure" in error
+        "F-999" in error
         for error in complete["first_attempt_errors"]
     )
 

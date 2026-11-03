@@ -1001,3 +1001,86 @@ def test_real_pool_finding_evidence_validates(soc2_env):
         for finding in digest["findings"]
         for item in finding["evidence"]
     )
+
+
+def test_clean_exception_reclassified_to_no_exception(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["exceptions"].append(
+        _exception(
+            "CC9.2",
+            "No exceptions noted.",
+            control_ref="CC9.2-01",
+            locator="Section 4, CC9.2-01",
+        )
+    )
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_reclass", AS_OF)
+    assert result.reclassified == [
+        {"control_ref": "CC9.2-01", "criterion": "CC9.2"}
+    ]
+    rules = [finding.get("rule_id") for finding in result.findings]
+    assert "SOC2-EXCEPTION-VENDOR" not in rules
+    assert "SOC2-EXCEPTION-ACCESS" in rules
+    assert "CC9.2" not in [
+        item["control_id"]
+        for item in result.soc2_analysis["exceptions"]
+    ]
+    clean = [
+        item
+        for item in result.evidence_pool
+        if item.get("evidence_kind") == "no_exception"
+        and "CC9.2-01" in item["excerpt"]
+    ]
+    assert len(clean) == 1
+
+
+def test_reclassified_skips_duplicate_tested_row(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["exceptions"].append(
+        _exception(
+            "CC9.2",
+            "No exceptions noted.",
+            control_ref="CC9.2-01",
+            locator="Section 4, CC9.2-01",
+        )
+    )
+    extraction["controls_tested"] = [
+        _tested_row("CC9.2-01", "no_exception", "No exceptions noted.")
+    ]
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_reclass", AS_OF)
+    assert result.reclassified == [
+        {"control_ref": "CC9.2-01", "criterion": "CC9.2"}
+    ]
+    rows = [
+        tested
+        for tested in result.controls_tested
+        if tested.get("control_ref") == "CC9.2-01"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["result"] == "no_exception"
+    assert "SOC2-EXCEPTION-VENDOR" not in [
+        finding.get("rule_id") for finding in result.findings
+    ]
+
+
+def test_tested_exception_with_clean_quote_flipped(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["controls_tested"] = [
+        _tested_row("CC9.2-01", "exception", "No exceptions noted.")
+    ]
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_reclass", AS_OF)
+    assert result.reclassified == [
+        {"control_ref": "CC9.2-01", "criterion": "CC9.2"}
+    ]
+    rows = [
+        tested
+        for tested in result.controls_tested
+        if tested.get("control_ref") == "CC9.2-01"
+    ]
+    assert len(rows) == 1
+    assert rows[0]["result"] == "no_exception"

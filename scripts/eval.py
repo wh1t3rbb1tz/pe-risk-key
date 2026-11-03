@@ -542,7 +542,7 @@ def main(argv: list[str] | None = None, runner=None) -> int:
     )
     markdown = render_markdown(results, per_target)
     (RESULTS_DIR / f"{stamp}.md").write_text(markdown, encoding="utf-8")
-    (ROOT / "eval" / "LATEST.md").write_text(markdown, encoding="utf-8")
+    (RESULTS_DIR.parent / "LATEST.md").write_text(markdown, encoding="utf-8")
     print(f"\nwrote eval/results/{stamp}.json + .md (copied to eval/LATEST.md)")
     print(f"total cost: ${results['total_cost_usd']:.4f}")
     return 0

@@ -68,6 +68,9 @@ def print_report(result) -> None:
             f"  {finding['finding_id']} rule_id={finding.get('rule_id')} "
             f"severity={finding['severity']} {finding['title'][:60]}"
         )
+    print(f"\nreclassified to no_exception: {len(result.reclassified)}")
+    for item in result.reclassified:
+        print(f"  {item.get('control_ref')} ({item.get('criterion')})")
     print(
         f"\ndrops: {len(result.dropped_unquoted)} unquoted, "
         f"{len(result.dropped_no_locator)} without locator"

@@ -366,6 +366,8 @@ def _run_soc2_analysis(
         finding_count=len(result.findings),
         exception_count=len(result.soc2_analysis["exceptions"]),
     )
+    if result.reclassified:
+        ctx.trace.event("soc2_reclassified", items=result.reclassified)
     return result
 
 

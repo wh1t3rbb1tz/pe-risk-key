@@ -20,38 +20,29 @@ from pe_risk_key.providers import (
     ModelClient,
     estimate_token_cost_usd,
 )
-from pe_risk_key.schemas import deal_recommendation_type_enum
 
 SYSTEM_PROMPT = """You write the investment-committee narrative for a cyber-risk digest. Rules:
-1. executive_summary (max 1200 characters) has four labeled paragraphs: "Bottom line:" the decision in one sentence, then the rating and why, with the caps in plain words; "Key risks:" the top 3-4; "Management credibility:" the contradiction pattern, with counts taken from the input; "Next steps:" what to do next.
-2. Every sentence that asserts a risk must cite at least one finding or contradiction id in square brackets, e.g. [F-001] [C-002].
+1. Write four summary fields as plain prose: bottom_line (max 300 chars: the decision in one sentence, then the rating and why, with the caps in plain words); key_risks (max 400 chars: the top 3-4); management_credibility (max 250 chars: at most one sentence interpreting the claim verdicts, whose counts are computed separately; empty string when no interview was provided); next_steps (max 300 chars: what to do next).
+2. Never write [F-xxx]/[C-xxx] ids in prose. Instead choose basis_ids for each field and question from the available_ids in the input; citations are rendered from those.
 3. Never state numbers (costs, counts, dates, scores) that aren't in the input; use the scored values exactly as given, in the input's money style.
-4. Deal recommendations: write exactly one recommendation per required type, following its guidance. Recommendations must reference the remediation windows. The overall decision is shown separately and must not be restated in any recommendation; give each recommendation a distinct opening, and never start one with its own type name.
-5. key_questions_for_management: 5 to 8 questions, each tied to specific findings or contradictions via bracket citations. Use neutral diligence phrasing ("Provide...", "Reconcile...", "Confirm..."), never "Why did...".
-6. Write plain IC prose: no enum strings, cap ids, control codes, or evidence locators. Cite [F-xxx]/[C-xxx] instead."""
+4. recommendation_slots lists one slot per required recommendation, each with an index, type, guidance, and basis. Return exactly one text per slot, in slot order: text only, referencing the remediation windows. The overall decision is shown separately and must not be restated in any recommendation; give each recommendation a distinct opening, and never start one with its own type name.
+5. key_questions_for_management: 5 to 8 questions (each with basis_ids), using neutral diligence phrasing ("Provide...", "Reconcile...", "Confirm..."), never "Why did...".
+6. Write plain IC prose: no enum strings, cap ids, control codes, or evidence locators."""
 
-MAX_SUMMARY_CHARS = 1200
-MAX_SHORT_SUMMARY_CHARS = 600
 SHORT_EVIDENCE_FINDINGS = 3
 SHORT_QUESTION_RANGE = (3, 4)
 FULL_QUESTION_RANGE = (5, 8)
 NO_INTERVIEW_CREDIBILITY = "Not assessed: no management interview provided."
+NO_CLAIMS_CREDIBILITY = "No management claims were assessed."
 
-RISK_KEYWORDS = (
-    "exception",
-    "contradict",
-    "breach",
-    "kev",
-    "not enforced",
-    "gap",
-    "exposure",
-)
-
-SUMMARY_SECTIONS = (
-    "bottom line:",
-    "key risks:",
-    "management credibility:",
-    "next steps:",
+# Model-written summary fields: (key, digest label, max chars). Code
+# assembles them into executive_summary; each field is trimmed at a
+# sentence boundary, never removed.
+SUMMARY_FIELDS: tuple[tuple[str, str, int], ...] = (
+    ("bottom_line", "Bottom line:", 300),
+    ("key_risks", "Key risks:", 400),
+    ("management_credibility", "Management credibility:", 250),
+    ("next_steps", "Next steps:", 300),
 )
 
 DEAL_SIGNAL_LABELS = {
@@ -141,8 +132,6 @@ _REPAIR_TOKEN_LABELS = {
 _MECHANICAL_ERROR_MARKERS = (
     "with 2+ decimals",
     "leaks ",
-    "chars (max",
-    "max 2 for a short evidence base",
 )
 _FUNCTION_CODE_RE = re.compile(
     r"\b(GV|PR|DE|RS|RC)\b|\b(GV|ID|PR|DE|RS|RC)\.[A-Z]{2,3}\b"
@@ -160,42 +149,56 @@ _VERDICT_ORDER = {"contradicted": 0, "unsupported": 1, "supported": 2}
 
 
 def narrative_schema() -> dict[str, Any]:
-    """Strict-ready schema for the IC narrative output."""
+    """Strict-ready schema for the IC narrative output.
+
+    Code owns structure, citations, and recommendation slots: the
+    model writes field prose plus basis ids, interpretation, and one
+    recommendation text per slot, by index.
+    """
+    field = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["text", "basis_ids"],
+        "properties": {
+            "text": {"type": "string"},
+            "basis_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    }
     return {
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "executive_summary",
+            "bottom_line",
+            "key_risks",
+            "management_credibility",
+            "next_steps",
             "key_questions_for_management",
             "deal_recommendations",
         ],
         "properties": {
-            "executive_summary": {
-                "type": "string",
-                "description": "IC memo summary, max 1800 chars.",
+            "bottom_line": field,
+            "key_risks": field,
+            "management_credibility": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text"],
+                "properties": {"text": {"type": "string"}},
             },
+            "next_steps": field,
             "key_questions_for_management": {
                 "type": "array",
-                "items": {"type": "string"},
-                "description": "5 to 8 questions with bracket citations.",
+                "items": field,
             },
             "deal_recommendations": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
-                    "required": ["type", "text", "basis_ids"],
-                    "properties": {
-                        "type": {
-                            "type": "string",
-                            "enum": deal_recommendation_type_enum(),
-                        },
-                        "text": {"type": "string"},
-                        "basis_ids": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
+                    "required": ["text"],
+                    "properties": {"text": {"type": "string"}},
                 },
             },
         },
@@ -216,10 +219,6 @@ def _number_tokens(text: str) -> set[str]:
     return {
         match.replace(",", "") for match in _NUMBER_RE.findall(text)
     }
-
-
-def _cited_ids(text: str) -> list[str]:
-    return [f"{kind}-{num}" for kind, num in _CITE_RE.findall(text)]
 
 
 def _shared_prefix_words(first: str, second: str) -> int:
@@ -273,13 +272,15 @@ def _decimal_text(value: Any) -> Any:
         return value
 
 
-def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _label_payload(
+    payload: dict[str, Any], slots: list[dict[str, Any]]
+) -> dict[str, Any]:
     """Model input with display labels instead of enums and cap ids.
 
     Severities, confidences, verdicts, and opinions stay as plain words;
     rule ids, control categories, and locators are dropped so the model
     cannot echo them. Counts and window names are included so grounded
-    numbers validate.
+    numbers validate. Recommendation slots carry plain type labels.
     """
     overall = payload.get("overall", {})
     findings = []
@@ -392,7 +393,31 @@ def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "limitations": [
             _label_text(entry) for entry in payload.get("limitations", [])
         ],
-        "required_recommendations": payload.get("required_recommendations", {}),
+        "has_interview": payload.get("has_interview", True),
+        "has_soc2": payload.get("soc2_summary", True) is not None,
+        "available_ids": sorted(
+            [
+                finding.get("finding_id")
+                for finding in payload.get("findings", [])
+                if isinstance(finding.get("finding_id"), str)
+            ]
+            + [
+                item.get("contradiction_id")
+                for item in payload.get("contradictions", [])
+                if isinstance(item.get("contradiction_id"), str)
+            ]
+        ),
+        "recommendation_slots": [
+            {
+                "index": index,
+                "type": DEAL_TYPE_LABELS.get(
+                    slot["type"], slot["type"]
+                ),
+                "guidance": slot["guidance"],
+                "basis_ids": slot["basis_ids"],
+            }
+            for index, slot in enumerate(slots)
+        ],
     }
 
 
@@ -528,21 +553,138 @@ def _leak_errors(label: str, text: str) -> list[str]:
     return leaks
 
 
-def _section_text(summary: str, section: str) -> str:
-    """Text of one labeled summary paragraph (label excluded)."""
-    lowered = summary.lower()
-    start = lowered.find(section)
-    if start < 0:
-        return ""
-    start += len(section)
-    ends = [
-        lowered.find(other, start)
-        for other in SUMMARY_SECTIONS
-        if other != section
-    ]
-    ends = [position for position in ends if position >= 0]
-    end = min(ends) if ends else len(summary)
-    return summary[start:end].strip()
+def _render_prose(text: str, basis_ids: list[str], terminal: str) -> str:
+    """Prose plus trailing [F-xxx]/[C-xxx] chips and terminal punctuation."""
+    stripped = re.sub(r"[.!?]+$", "", (text or "").strip()).rstrip()
+    if basis_ids:
+        chips = " ".join(f"[{ref}]" for ref in basis_ids)
+        stripped = f"{stripped} {chips}" if stripped else chips
+    if terminal and stripped and not stripped.endswith(terminal):
+        stripped += terminal
+    return stripped
+
+
+def _credibility_counts(contradictions: list[dict[str, Any]]) -> str:
+    """Code-computed claim-verdict counts sentence."""
+    if not contradictions:
+        return NO_CLAIMS_CREDIBILITY
+    verdicts = [item.get("verdict") for item in contradictions]
+    contradicted = sum(1 for verdict in verdicts if verdict == "contradicted")
+    unsupported = sum(1 for verdict in verdicts if verdict == "unsupported")
+    supported = sum(1 for verdict in verdicts if verdict == "supported")
+    return (
+        f"Of {len(contradictions)} claims assessed, {contradicted} were "
+        f"contradicted, {unsupported} unsupported, {supported} supported."
+    )
+
+
+def recommendation_slots(
+    required_map: dict[str, Any], finding_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Deterministic recommendation slots: type plus code-owned basis.
+
+    Trigger recommendations cite their triggering findings; slots
+    without triggers (coverage-cap conditions, price adjustments) cite
+    every finding. Order follows the trigger table.
+    """
+    slots = []
+    for rec_type, entry in (required_map or {}).items():
+        trigger_ids = (
+            entry.get("trigger_findings", [])
+            if isinstance(entry, dict)
+            else []
+        )
+        basis = list(trigger_ids) if trigger_ids else list(finding_ids)
+        guidance = (
+            entry.get("guidance", [])
+            if isinstance(entry, dict)
+            else []
+        )
+        slots.append(
+            {"type": rec_type, "basis_ids": basis, "guidance": guidance}
+        )
+    return slots
+
+
+def assemble_narrative(
+    output: dict[str, Any],
+    *,
+    slots: list[dict[str, Any]],
+    contradictions: list[dict[str, Any]],
+    has_interview: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Assemble digest narrative + recs from repaired model output.
+
+    Labels, credibility counts, and trailing chips are code-rendered.
+    Recommendation slots with blank text are dropped.
+    """
+    fields = {}
+    for key, label, _ in SUMMARY_FIELDS:
+        entry = output.get(key) or {}
+        fields[key] = (
+            entry.get("text", "") if isinstance(entry, dict) else "",
+            entry.get("basis_ids", []) if isinstance(entry, dict) else [],
+        )
+    if has_interview:
+        counts = _credibility_counts(contradictions)
+        interpretation = fields["management_credibility"][0].strip()
+        credibility = (
+            f"{counts} {interpretation}" if interpretation else counts
+        )
+        credibility_basis = [
+            item.get("contradiction_id")
+            for item in contradictions
+            if item.get("verdict") == "contradicted"
+            and isinstance(item.get("contradiction_id"), str)
+        ]
+    else:
+        credibility = NO_INTERVIEW_CREDIBILITY
+        credibility_basis = []
+    summary = " ".join(
+        f"{label} "
+        + (
+            _render_prose(credibility, credibility_basis, ".")
+            if key == "management_credibility"
+            else _render_prose(text, basis, ".")
+        )
+        for key, label, _ in SUMMARY_FIELDS
+        for text, basis in [fields[key]]
+    )
+    questions = []
+    for question in output.get("key_questions_for_management", []) or []:
+        if not isinstance(question, dict):
+            continue
+        questions.append(
+            _render_prose(
+                question.get("text", ""),
+                question.get("basis_ids", []) or [],
+                "?",
+            )
+        )
+    texts = output.get("deal_recommendations", []) or []
+    recs = []
+    for index, slot in enumerate(slots):
+        text = (
+            texts[index].get("text", "")
+            if index < len(texts) and isinstance(texts[index], dict)
+            else ""
+        )
+        if not isinstance(text, str) or not text.strip():
+            continue
+        recs.append(
+            {
+                "type": slot["type"],
+                "text": _render_prose(text, slot["basis_ids"], "."),
+                "basis_ids": list(slot["basis_ids"]),
+            }
+        )
+    return (
+        {
+            "executive_summary": summary,
+            "key_questions_for_management": questions,
+        },
+        recs,
+    )
 
 
 def validate_narrative(
@@ -551,15 +693,17 @@ def validate_narrative(
     finding_ids: set[str],
     contradiction_ids: set[str],
     input_numbers: set[str],
-    required_types: set[str] | None = None,
-    trigger_findings: dict[str, list[str]] | None = None,
-    contradiction_verdicts: dict[str, str] | None = None,
-    has_interview: bool = True,
+    slot_types: list[str],
     has_soc2: bool = True,
     finding_count: int | None = None,
     deal_label: str = "",
 ) -> list[str]:
-    """Human-readable validation errors; empty means valid."""
+    """Human-readable validation errors; empty means valid.
+
+    Code owns structure, citations, and recommendation slots, so only
+    model-chosen content is checked: unknown basis ids, ungrounded
+    numbers, enum/decision-label leaks, speculation, and rec shape.
+    """
     errors: list[str] = []
     if not isinstance(output, dict):
         return ["narrative output is not an object."]
@@ -569,51 +713,61 @@ def validate_narrative(
     ]
     count = len(finding_ids) if finding_count is None else finding_count
     short = count <= SHORT_EVIDENCE_FINDINGS
-    max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
-    summary = output.get("executive_summary")
-    if not isinstance(summary, str):
-        errors.append("executive_summary is not a string.")
-        summary = ""
-    else:
-        if len(summary) > max_chars:
+    prose_texts: list[tuple[str, str]] = []
+
+    def check_basis(label: str, basis: Any) -> None:
+        if not isinstance(basis, list):
+            errors.append(f"{label} basis_ids is not a list.")
+            return
+        for ref in basis:
+            if ref in finding_ids or ref in contradiction_ids:
+                continue
+            errors.append(f"{label} cites unknown id {ref!r}.")
+
+    def check_prose(label: str, text: Any, required: bool = True) -> str:
+        if not isinstance(text, str) or not text.strip():
+            if required:
+                errors.append(f"{label} text is missing.")
+            return ""
+        errors.extend(_leak_errors(label, text))
+        for phrase in sorted(
+            {match.group(0).lower() for match in _SPECULATION_RE.finditer(text)}
+        ):
             errors.append(
-                f"executive_summary is {len(summary)} chars "
-                f"(max {max_chars})."
+                f"{label} speculates ({phrase!r}); state what is known "
+                "and what to verify."
             )
-        lowered = summary.lower()
-        for section in SUMMARY_SECTIONS:
-            if section not in lowered:
+        if deal_keywords:
+            tail = re.split(r"[,;]", text)[-1].strip().lower()
+            if _SIGNAL_RESTATED_LE_RE.search(
+                tail
+            ) and any(expr.search(tail) for expr in deal_keywords):
                 errors.append(
-                    f"executive_summary is missing {section!r} section."
+                    f"{label} ends by restating the deal signal "
+                    f"({tail[:80]!r}); fold it into the substance instead."
                 )
-        if not has_interview:
-            credibility = _section_text(summary, "management credibility:")
-            if credibility != NO_INTERVIEW_CREDIBILITY:
-                errors.append(
-                    "management credibility must read exactly "
-                    f"{NO_INTERVIEW_CREDIBILITY!r} when no interview was "
-                    "provided."
-                )
-        if not has_soc2:
-            coverage = _section_text(
-                summary, "key risks:"
-            ) + _section_text(summary, "next steps:")
-            if "soc 2" not in coverage.lower():
-                errors.append(
-                    "state in key risks or next steps that no SOC 2 "
-                    "report was provided."
-                )
-        if short:
-            cites: dict[str, int] = {}
-            for kind, number in _CITE_RE.findall(summary):
-                ref = f"{kind}-{number}"
-                cites[ref] = cites.get(ref, 0) + 1
-            for ref in sorted(cites):
-                if cites[ref] > 2:
-                    errors.append(
-                        f"executive_summary cites {ref} {cites[ref]} "
-                        "times (max 2 for a short evidence base)."
-                    )
+        prose_texts.append((label, text))
+        return text
+
+    fields: dict[str, str] = {}
+    for key, _, _ in SUMMARY_FIELDS:
+        entry = output.get(key)
+        if not isinstance(entry, dict):
+            errors.append(f"{key} is not an object.")
+            fields[key] = ""
+            continue
+        fields[key] = check_prose(
+            key, entry.get("text"), required=key != "management_credibility"
+        )
+        if key != "management_credibility":
+            check_basis(key, entry.get("basis_ids"))
+    if not has_soc2:
+        coverage = fields["key_risks"] + fields["next_steps"]
+        if "soc 2" not in coverage.lower():
+            errors.append(
+                "state in key risks or next steps that no SOC 2 "
+                "report was provided."
+            )
     questions = output.get("key_questions_for_management")
     question_range = SHORT_QUESTION_RANGE if short else FULL_QUESTION_RANGE
     if not isinstance(questions, list):
@@ -624,63 +778,36 @@ def validate_narrative(
             f"key_questions_for_management has {len(questions)} entries "
             f"(need {question_range[0]}-{question_range[1]})."
         )
-    recs = output.get("deal_recommendations")
-    if not isinstance(recs, list):
-        errors.append("deal_recommendations is not a list.")
-        recs = []
-
-    def check_text(label: str, text: Any, require_citation: bool) -> None:
-        if not isinstance(text, str):
-            errors.append(f"{label} is not a string.")
-            return
-        errors.extend(_leak_errors(label, text))
-        for phrase in sorted(
-            {match.group(0).lower() for match in _SPECULATION_RE.finditer(text)}
-        ):
-            errors.append(
-                f"{label} speculates ({phrase!r}); state what is known "
-                "and what to verify."
-            )
-        if require_citation and not _CITE_RE.search(text):
-            errors.append(
-                f"{label} is not tied to any finding or contradiction."
-            )
-        for sentence in _split_sentences(text):
-            lowered = sentence.lower()
-            if any(word in lowered for word in RISK_KEYWORDS) and not (
-                _CITE_RE.search(sentence)
-            ):
-                errors.append(
-                    f"{label} has an uncited risk sentence: "
-                    f"{sentence[:100]}"
-                )
-
-    check_text("executive_summary", summary, require_citation=False)
     for index, question in enumerate(questions):
         label = f"question {index + 1}"
-        check_text(label, question, require_citation=True)
-        if isinstance(question, str) and _WHY_DID_RE.search(question):
+        if not isinstance(question, dict):
+            errors.append(f"{label} is not an object.")
+            continue
+        text = check_prose(label, question.get("text"))
+        check_basis(label, question.get("basis_ids"))
+        if text and _WHY_DID_RE.search(text):
             errors.append(
                 f"{label} uses 'why did' phrasing; use neutral diligence "
                 "phrasing."
             )
-    valid_types = set(deal_recommendation_type_enum())
-    seen_types: set[str] = set()
-    triggers = trigger_findings or {}
-    verdicts = contradiction_verdicts or {}
+    recs = output.get("deal_recommendations")
+    if not isinstance(recs, list):
+        errors.append("deal_recommendations is not a list.")
+        recs = []
+    elif len(recs) != len(slot_types):
+        errors.append(
+            f"deal_recommendations has {len(recs)} texts for "
+            f"{len(slot_types)} slots."
+        )
+    rec_texts: list[tuple[int, str]] = []
     for index, rec in enumerate(recs):
         label = f"deal_recommendations[{index}]"
         if not isinstance(rec, dict):
             errors.append(f"{label} is not an object.")
             continue
-        if rec.get("type") not in valid_types:
-            errors.append(f"{label} has unknown type {rec.get('type')!r}.")
-        else:
-            seen_types.add(rec["type"])
-        text = rec.get("text")
-        check_text(label, text, require_citation=False)
-        if isinstance(text, str) and isinstance(rec.get("type"), str):
-            type_label = DEAL_TYPE_LABELS.get(rec["type"], "")
+        text = check_prose(label, rec.get("text"))
+        if index < len(slot_types) and text:
+            type_label = DEAL_TYPE_LABELS.get(slot_types[index], "")
             if type_label and text.lstrip().lower().startswith(
                 type_label.lower()
             ):
@@ -688,41 +815,7 @@ def validate_narrative(
                     f"{label} starts with its own type label; lead with "
                     "the substance instead."
                 )
-        if isinstance(text, str) and deal_keywords:
-            tail = re.split(r"[,;]", text)[-1].strip().lower()
-            if _SIGNAL_RESTATED_LE_RE.search(
-                tail
-            ) and any(expr.search(tail) for expr in deal_keywords):
-                errors.append(
-                    f"{label} ends by restating the deal signal "
-                    f"({tail[:80]!r}); fold it into the substance instead."
-                )
-        basis = rec.get("basis_ids")
-        if not isinstance(basis, list) or not basis:
-            errors.append(f"{label} has no basis_ids.")
-        else:
-            for ref in basis:
-                if ref in finding_ids or ref in contradiction_ids:
-                    if verdicts.get(ref) == "supported":
-                        errors.append(
-                            f"{label} cites supported contradiction {ref}; "
-                            "basis must contradict or be silent."
-                        )
-                    continue
-                errors.append(f"{label} cites unknown id {ref!r}.")
-            needed = triggers.get(rec.get("type"), [])
-            if needed and not (set(basis) & set(needed)):
-                errors.append(
-                    f"{label} basis must include trigger finding(s) "
-                    f"{', '.join(needed)}."
-                )
-    for rec_type in sorted((required_types or set()) - seen_types):
-        errors.append(f"missing required {rec_type} recommendation.")
-    rec_texts = [
-        (index, rec.get("text"))
-        for index, rec in enumerate(recs)
-        if isinstance(rec, dict) and isinstance(rec.get("text"), str)
-    ]
+            rec_texts.append((index, text))
     for left in range(len(rec_texts)):
         for right in range(left + 1, len(rec_texts)):
             shared = _shared_prefix_words(
@@ -732,30 +825,17 @@ def validate_narrative(
                 errors.append(
                     f"deal_recommendations[{rec_texts[left][0]}] and "
                     f"[{rec_texts[right][0]}] share a {shared}-word "
-                    "leading clause; restate the deal signal once at most."
+                    "leading clause; give each a distinct opening."
                 )
-    cited: set[str] = set()
-    texts: list[Any] = [summary, *questions]
-    texts.extend(
-        rec.get("text") for rec in recs if isinstance(rec, dict)
-    )
-    for text in texts:
-        if isinstance(text, str):
-            cited.update(_cited_ids(text))
-    for ref in sorted(cited):
-        if ref in finding_ids or ref in contradiction_ids:
-            continue
-        errors.append(f"cited id {ref} does not exist in this digest.")
-    summary_quantities = _SOC_TWO_RE.sub("", summary)
-    for token in sorted(_number_tokens(summary_quantities) - input_numbers):
-        errors.append(
-            f"executive_summary states number {token} not in the input."
-        )
-    for token in sorted(set(_OVER_PRECISE_RE.findall(summary))):
-        errors.append(
-            f"executive_summary states number {token} with 2+ decimals; "
-            "use one-decimal scores."
-        )
+    for label, text in prose_texts:
+        quantities = _SOC_TWO_RE.sub("", text)
+        for token in sorted(_number_tokens(quantities) - input_numbers):
+            errors.append(f"{label} states number {token} not in the input.")
+        for token in sorted(set(_OVER_PRECISE_RE.findall(text))):
+            errors.append(
+                f"{label} states number {token} with 2+ decimals; "
+                "use one-decimal scores."
+            )
     return errors
 
 
@@ -862,17 +942,16 @@ def _strip_decision_restatements(
 def repair_narrative(
     output: Any,
     *,
-    max_chars: int,
-    short: bool,
     deal_label: str,
 ) -> tuple[Any, list[str]]:
     """Deterministic fixes for mechanical narrative violations.
 
     Rounds over-precise scores, replaces enum/snake_case tokens via the
-    label maps, removes restated decision labels or phrasing from deal
-    recommendations, trims the summary at a sentence boundary, and
-    drops duplicate citations beyond two per id (short evidence only).
-    Returns the fixed output plus the repairs applied.
+    label maps, strips inline bracket ids (code renders chips),
+    removes restated decision labels or phrasing (except bottom_line,
+    which must state the decision), trims each summary field at a
+    sentence boundary, and dedupes basis arrays. Fields are never
+    removed. Returns the fixed output plus the repairs applied.
     """
     fixed = copy.deepcopy(output)
     repairs: list[str] = []
@@ -918,9 +997,10 @@ def repair_narrative(
 
         return _SNAKE_RE.sub(snake, text)
 
-    summary = fixed.get("executive_summary")
-    if isinstance(summary, str):
-        summary = detokenize(summary)
+    def clean_prose(label: str, text: Any, strip_decision: bool) -> Any:
+        if not isinstance(text, str):
+            return text
+        text = detokenize(text)
 
         def rounded(match: re.Match) -> str:
             new = f"{float(match.group(0)):.1f}"
@@ -928,55 +1008,91 @@ def repair_narrative(
                 repairs.append(f"rounded {match.group(0)} to {new}")
             return new
 
-        summary = _OVER_PRECISE_RE.sub(rounded, summary)
-        if len(summary) > max_chars:
-            kept: list[str] = []
-            total = 0
-            for sentence in _split_sentences(summary):
-                extra = len(sentence) + (1 if kept else 0)
-                if total + extra > max_chars:
-                    break
-                kept.append(sentence)
-                total += extra
-            trimmed = (
-                " ".join(kept) if kept else summary[:max_chars].rstrip()
-            )
-            repairs.append(
-                f"trimmed summary from {len(summary)} to {len(trimmed)} "
-                "chars"
-            )
-            summary = trimmed
-        if short:
-            seen: dict[str, int] = {}
+        text = _OVER_PRECISE_RE.sub(rounded, text)
 
-            def dedupe(match: re.Match) -> str:
-                ref = f"{match.group(1)}-{match.group(2)}"
-                seen[ref] = seen.get(ref, 0) + 1
-                if seen[ref] > 2:
-                    repairs.append(f"dropped duplicate citation of {ref}")
-                    return ""
-                return match.group(0)
+        def strip_cite(match: re.Match) -> str:
+            ref = f"{match.group(1)}-{match.group(2)}"
+            repairs.append(f"stripped inline [{ref}] from {label}")
+            return ""
 
-            summary = _CITE_RE.sub(dedupe, summary)
-            summary = re.sub(r" {2,}", " ", summary)
-        fixed["executive_summary"] = summary
+        text = _CITE_RE.sub(strip_cite, text)
+        text = re.sub(r" {2,}", " ", text).strip()
+        if strip_decision:
+            text, removed = _strip_decision_restatements(text, deal_label)
+            repairs.extend(removed)
+        return text
+
+    def trim_field(label: str, text: str, max_chars: int) -> str:
+        if len(text) <= max_chars:
+            return text
+        kept: list[str] = []
+        total = 0
+        for sentence in _split_sentences(text):
+            extra = len(sentence) + (1 if kept else 0)
+            if total + extra > max_chars:
+                break
+            kept.append(sentence)
+            total += extra
+        trimmed = " ".join(kept) if kept else text[:max_chars].rstrip()
+        repairs.append(
+            f"trimmed {label} from {len(text)} to {len(trimmed)} chars"
+        )
+        return trimmed
+
+    def dedupe_basis(entry: dict) -> None:
+        basis = entry.get("basis_ids")
+        if not isinstance(basis, list):
+            return
+        seen: set[str] = set()
+        unique = []
+        for ref in basis:
+            if isinstance(ref, str) and ref not in seen:
+                seen.add(ref)
+                unique.append(ref)
+        if unique != basis:
+            repairs.append("deduped basis_ids")
+        entry["basis_ids"] = unique
+
+    for key, _, max_chars in SUMMARY_FIELDS:
+        entry = fixed.get(key)
+        if not isinstance(entry, dict):
+            fixed[key] = {"text": "", "basis_ids": []}
+            continue
+        text = clean_prose(
+            key, entry.get("text"), strip_decision=key != "bottom_line"
+        )
+        if key == "management_credibility" and isinstance(text, str):
+            sentences = _split_sentences(text)
+            if len(sentences) > 1:
+                repairs.append(
+                    "trimmed management_credibility to one sentence"
+                )
+                text = sentences[0]
+        if isinstance(text, str):
+            text = trim_field(key, text, max_chars)
+        entry["text"] = text
+        dedupe_basis(entry)
     questions = fixed.get("key_questions_for_management")
     if isinstance(questions, list):
-        fixed["key_questions_for_management"] = [
-            detokenize(question) for question in questions
-        ]
+        for index, question in enumerate(questions):
+            if not isinstance(question, dict):
+                continue
+            question["text"] = clean_prose(
+                f"question {index + 1}",
+                question.get("text"),
+                strip_decision=True,
+            )
+            dedupe_basis(question)
     recs = fixed.get("deal_recommendations")
     if isinstance(recs, list):
-        for rec in recs:
+        for index, rec in enumerate(recs):
             if not isinstance(rec, dict):
                 continue
-            text = detokenize(rec.get("text"))
-            if isinstance(text, str):
-                text, removed = _strip_decision_restatements(
-                    text, deal_label
-                )
-                repairs.extend(removed)
-            rec["text"] = text
+            rec["text"] = clean_prose(
+                f"deal_recommendations[{index}]",
+                rec.get("text"),
+                strip_decision=True,
+            )
     return fixed, repairs
 
 
@@ -996,20 +1112,21 @@ def generate_narrative(
     ``payload`` carries target, overall, function_scores, findings,
     contradictions, remediation_plan, soc2_summary, has_interview,
     limitations, and required_recommendations. The model sees a labeled
-    view (display
-    labels instead of enums); numbers validate against that view.
-    Returns ``{narrative, deal_recommendations, valid,
-    validation_errors, regenerated, first_attempt_errors,
-    narrative_repairs, usage, estimated_cost_usd}``. The narrative is
-    sanitized for digest safety even when invalid.
+    view (display labels instead of enums) plus recommendation slots;
+    numbers validate against that view. Code assembles the digest
+    narrative (labels, credibility counts, chips, slot bases) from the
+    model's field prose. Returns ``{narrative, deal_recommendations,
+    valid, validation_errors, regenerated, first_attempt_errors,
+    narrative_repairs, usage, estimated_cost_usd}``.
     """
     findings = payload.get("findings", [])
     contradictions = payload.get("contradictions", [])
-    finding_ids = {
+    ordered_finding_ids = [
         finding["finding_id"]
         for finding in findings
         if isinstance(finding.get("finding_id"), str)
-    }
+    ]
+    finding_ids = set(ordered_finding_ids)
     contradiction_ids = {
         item["contradiction_id"]
         for item in contradictions
@@ -1018,34 +1135,13 @@ def generate_narrative(
     required_map = payload.get("required_recommendations", {}) or {}
     if not isinstance(required_map, dict):
         required_map = {}
-    required_types = set(required_map)
-    trigger_findings = {
-        rec_type: entry.get("trigger_findings", [])
-        for rec_type, entry in required_map.items()
-        if isinstance(entry, dict)
-    }
-    contradiction_verdicts = {
-        item.get("contradiction_id"): item.get("verdict")
-        for item in contradictions
-        if isinstance(item.get("contradiction_id"), str)
-    }
+    slots = recommendation_slots(required_map, ordered_finding_ids)
+    slot_types = [slot["type"] for slot in slots]
 
-    def add_trigger_basis(output: Any) -> None:
-        """Union each rec's basis with its trigger findings, in place."""
-        if not isinstance(output, dict):
-            return
-        for rec in output.get("deal_recommendations", []) or []:
-            if not isinstance(rec, dict):
-                continue
-            basis = rec.get("basis_ids")
-            if not isinstance(basis, list):
-                continue
-            for finding_id in trigger_findings.get(rec.get("type"), []):
-                if finding_id not in basis:
-                    basis.append(finding_id)
-
-    labeled = _label_payload(payload)
-    input_numbers = _number_tokens(json.dumps(labeled))
+    labeled = _label_payload(payload, slots)
+    # ensure_ascii=False: \u2013 escapes would glue window numbers into
+    # phantom tokens ("201360") and hide the real ones ("60").
+    input_numbers = _number_tokens(json.dumps(labeled, ensure_ascii=False))
     has_interview = payload.get("has_interview", True)
     has_soc2 = payload.get("soc2_summary", True) is not None
     short = len(finding_ids) <= SHORT_EVIDENCE_FINDINGS
@@ -1055,31 +1151,24 @@ def generate_narrative(
     extra_rules = [
         (
             f"The overall decision is: {deal_label}. State it once in "
-            "the Bottom line paragraph. It is shown separately in the "
+            "the bottom_line field. It is shown separately in the "
             "memo and must not be restated in deal recommendations."
             if deal_label
-            else "State the overall decision once in the Bottom line "
-            "paragraph; it must not be restated in deal recommendations."
+            else "State the overall decision once in the bottom_line "
+            "field; it must not be restated in deal recommendations."
         ),
         "Do not speculate about conditions not in the evidence "
         '("if present", "may contain"); state what is known and what '
         "to verify.",
     ]
-    if not has_interview:
-        extra_rules.append(
-            "The Management credibility paragraph must read exactly: "
-            f'"{NO_INTERVIEW_CREDIBILITY}"'
-        )
     if not has_soc2:
         extra_rules.append(
-            "State in Key risks or Next steps that no SOC 2 report was "
+            "State in key_risks or next_steps that no SOC 2 report was "
             "provided."
         )
     if short:
         extra_rules.append(
-            "Short evidence base: keep executive_summary to 600 "
-            "characters or fewer, ask 3 to 4 questions, and cite no "
-            "finding more than twice in the summary."
+            "Short evidence base: ask 3 to 4 questions."
         )
     system_prompt = SYSTEM_PROMPT + "".join(
         f"\n{index}. {rule}"
@@ -1096,12 +1185,10 @@ def generate_narrative(
         schema_name="narrative",
         reasoning_effort="medium",
     )
-    add_trigger_basis(output)
-    max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
 
     def validate_fixed(candidate: Any) -> tuple[Any, list[str], list[str]]:
         fixed, repairs = repair_narrative(
-            candidate, max_chars=max_chars, short=short, deal_label=deal_label
+            candidate, deal_label=deal_label
         )
         return (
             fixed,
@@ -1111,10 +1198,7 @@ def generate_narrative(
                 finding_ids=finding_ids,
                 contradiction_ids=contradiction_ids,
                 input_numbers=input_numbers,
-                required_types=required_types,
-                trigger_findings=trigger_findings,
-                contradiction_verdicts=contradiction_verdicts,
-                has_interview=has_interview,
+                slot_types=slot_types,
                 has_soc2=has_soc2,
                 deal_label=deal_label,
             ),
@@ -1144,53 +1228,18 @@ def generate_narrative(
             schema_name="narrative",
             reasoning_effort="medium",
         )
-        add_trigger_basis(output)
         output, repairs, errors = validate_fixed(output)
         narrative_repairs.extend(repairs)
     valid = not errors
-    summary = output.get("executive_summary", "")
-    questions = output.get("key_questions_for_management", [])
-    valid_types = set(deal_recommendation_type_enum())
-    merged_recs: dict[str, dict[str, Any]] = {}
-    for rec in output.get("deal_recommendations", []) or []:
-        if not isinstance(rec, dict) or rec.get("type") not in valid_types:
-            continue
-        basis = [
-            ref
-            for ref in (rec.get("basis_ids") or [])
-            if ref in finding_ids or ref in contradiction_ids
-        ]
-        if not basis:
-            continue
-        text = (
-            rec.get("text", "")
-            if isinstance(rec.get("text"), str)
-            else ""
-        )
-        if rec["type"] in merged_recs:
-            existing = merged_recs[rec["type"]]
-            existing["basis_ids"] = list(
-                dict.fromkeys([*existing["basis_ids"], *basis])
-            )
-            existing["text"] = f"{existing['text']} {text}".strip()
-        else:
-            merged_recs[rec["type"]] = {
-                "type": rec["type"],
-                "text": text,
-                "basis_ids": basis,
-            }
-    recs = list(merged_recs.values())
+    narrative, recs = assemble_narrative(
+        output if isinstance(output, dict) else {},
+        slots=slots,
+        contradictions=contradictions,
+        has_interview=has_interview,
+    )
     usage = dict(client.total_usage)
-    summary_cap = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
     return {
-        "narrative": {
-            "executive_summary": summary[:summary_cap]
-            if isinstance(summary, str)
-            else "",
-            "key_questions_for_management": [
-                question for question in questions if isinstance(question, str)
-            ],
-        },
+        "narrative": narrative,
         "deal_recommendations": recs,
         "valid": valid,
         "validation_errors": errors,

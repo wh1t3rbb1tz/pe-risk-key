@@ -57,6 +57,8 @@ def test_yes_runs_all_targets_with_counts(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("DEMO_MODE", raising=False)
     script.RUNS_DIR = tmp_path / "runs"
     script.RESULTS_DIR = tmp_path / "results"
+    latest = ROOT / "eval" / "LATEST.md"
+    before = latest.read_bytes() if latest.exists() else None
     runner = Mock(side_effect=RuntimeError("boom"))
     assert (
         script.main(
@@ -79,6 +81,9 @@ def test_yes_runs_all_targets_with_counts(tmp_path, monkeypatch, capsys):
     assert "interview_path" not in copperline_kwargs
     assert len(list((tmp_path / "results").glob("*.json"))) == 1
     assert len(list((tmp_path / "results").glob("*.md"))) == 1
+    assert (tmp_path / "LATEST.md").exists()
+    after = latest.read_bytes() if latest.exists() else None
+    assert after == before
 
 
 def test_estimate_cost_from_recent_runs(tmp_path):

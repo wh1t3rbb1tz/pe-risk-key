@@ -1,0 +1,236 @@
+{
+  "created_at": "20261103T014553Z",
+  "interview_id": "iv_brightwaterctointerview",
+  "transcript": {
+    "interview_id": "iv_brightwaterctointerview",
+    "sha256": "dfec0d51325fc2f141d7d4842dd4e02c3e7101cf9b04410d4fc5850f1681db37",
+    "duration_seconds": 102.64,
+    "turns": [
+      {
+        "turn_index": 0,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "00:00",
+        "end": "00:11",
+        "text": "Thanks for making time, Dana. We'll keep this to the security basics so the deal team has a clean picture. Let's start with identity. How is admin access protected?"
+      },
+      {
+        "turn_index": 1,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "00:11",
+        "end": "00:19",
+        "text": "Every admin account is behind MFA. No exceptions. That's been true for years. It's enforced through our conditional access policy."
+      },
+      {
+        "turn_index": 2,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "00:20",
+        "end": "00:22",
+        "text": "And when someone leaves the company?"
+      },
+      {
+        "turn_index": 3,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "00:22",
+        "end": "00:30",
+        "text": "Offboarding is automated. HR flags the termination and access is revoked same day through our identity provider."
+      },
+      {
+        "turn_index": 4,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "00:30",
+        "end": "00:32",
+        "text": "Talk to me about monitoring."
+      },
+      {
+        "turn_index": 5,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "00:33",
+        "end": "00:39",
+        "text": "We have a 24 7 SOC through our MSSP, every alert gets looked at, nothing sits. Email"
+      },
+      {
+        "turn_index": 6,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "00:39",
+        "end": "00:48",
+        "text": "Email is a big one for us. Our Our portfolio companies get hit with wire fraud attempts constantly. Where are you on spoofing protection?"
+      },
+      {
+        "turn_index": 7,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "00:48",
+        "end": "00:54",
+        "text": "We're fully locked down there. DMARC is enforced. Nobody can spoof our domain."
+      },
+      {
+        "turn_index": 8,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "00:54",
+        "end": "00:58",
+        "text": "Any security incidents in the last few few years?"
+      },
+      {
+        "turn_index": 9,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "00:58",
+        "end": "01:02",
+        "text": "No, nothing material. We've never had a breach."
+      },
+      {
+        "turn_index": 10,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "01:02",
+        "end": "01:08",
+        "text": "What about your external attack surface? Legacy systems, old infrastructure?"
+      },
+      {
+        "turn_index": 11,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "01:08",
+        "end": "01:14",
+        "text": "We decommissioned the legacy stuff a while back. Everything external goes through the main app and the VPN."
+      },
+      {
+        "turn_index": 12,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "01:15",
+        "end": "01:16",
+        "text": "Pen testing?"
+      },
+      {
+        "turn_index": 13,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "01:16",
+        "end": "01:21",
+        "text": "Annual third party test. The last one came back clean. No highs."
+      },
+      {
+        "turn_index": 14,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "01:22",
+        "end": "01:23",
+        "text": "Backups and recovery?"
+      },
+      {
+        "turn_index": 15,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "01:24",
+        "end": "01:30",
+        "text": "Daily backups to immutable storage in a second region and we do a restore test every quarter."
+      },
+      {
+        "turn_index": 16,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "01:30",
+        "end": "01:35",
+        "text": "Last one, do you have a bridge letter for the period since your SOC 2 ended?"
+      },
+      {
+        "turn_index": 17,
+        "speaker_label": "B",
+        "speaker_name": "Dana Reyes (CTO)",
+        "start": "01:35",
+        "end": "01:38",
+        "text": "We can get one. one we haven't needed it so far."
+      },
+      {
+        "turn_index": 18,
+        "speaker_label": "A",
+        "speaker_name": "Diligence Lead",
+        "start": "01:39",
+        "end": "01:42",
+        "text": "Great, that's what I needed. Thanks, Dana"
+      }
+    ],
+    "usage": {
+      "audio_hours": 0.028511
+    },
+    "estimated_cost_usd": 0.005132,
+    "cached": false,
+    "skipped_empty": 0,
+    "speaker_inferred": 1
+  },
+  "claims": {
+    "claims": [],
+    "dropped_unquoted": [
+      {
+        "turn_index": 1,
+        "speaker": "Dana Reyes (CTO)",
+        "text": "Offboarding is automated. HR flags the termination and access is revoked same day through our identity provider.",
+        "closest_window": "every admin account is behind mfa. no exceptions. that's been true for years. it's enforced through our conditio",
+        "similarity_ratio": 0.384
+      },
+      {
+        "turn_index": 3,
+        "speaker": "Dana Reyes (CTO)",
+        "text": "We're fully locked down there. DMARC is enforced. Nobody can spoof our domain.",
+        "closest_window": "r flags the termination and access is revoked same day through our identity pr",
+        "similarity_ratio": 0.269
+      },
+      {
+        "turn_index": 5,
+        "speaker": "Dana Reyes (CTO)",
+        "text": "We decommissioned the legacy stuff a while back. Everything external goes through the main app and the VPN.",
+        "closest_window": "we have a 24 7 soc through our mssp, every alert gets looked at, nothing sits. email",
+        "similarity_ratio": 0.251
+      },
+      {
+        "turn_index": 7,
+        "speaker": "Dana Reyes (CTO)",
+        "text": "Daily backups to immutable storage in a second region and we do a restore test every quarter.",
+        "closest_window": "we're fully locked down there. dmarc is enforced. nobody can spoof our domain.",
+        "similarity_ratio": 0.269
+      }
+    ],
+    "dropped_not_target": [
+      {
+        "reason": "not_target_speaker",
+        "turn_index": 0,
+        "speaker": "Diligence Lead"
+      },
+      {
+        "reason": "not_target_speaker",
+        "turn_index": 2,
+        "speaker": "Diligence Lead"
+      },
+      {
+        "reason": "not_target_speaker",
+        "turn_index": 4,
+        "speaker": "Diligence Lead"
+      },
+      {
+        "reason": "not_target_speaker",
+        "turn_index": 6,
+        "speaker": "Diligence Lead"
+      },
+      {
+        "reason": "not_target_speaker",
+        "turn_index": 8,
+        "speaker": "Diligence Lead"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 677,
+      "completion_tokens": 1912,
+      "cached_tokens": 0
+    },
+    "estimated_cost_usd": 0.040948
+  }
+}

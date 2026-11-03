@@ -68,7 +68,7 @@ def print_drops(result) -> None:
         print("  -")
         return
     for drop in result["dropped_unquoted"]:
-        print(f"  turn {drop['turn_index']} ({drop['speaker']}): unquoted")
+        print(f"  unquoted: {(drop.get('text') or '')[:120]}")
         print(f"    closest window: {drop.get('closest_window', '')[:160]}")
         print(f"    similarity: {drop.get('similarity_ratio', 0.0)}")
     for drop in result["dropped_not_target"]:
@@ -76,6 +76,7 @@ def print_drops(result) -> None:
             f"  turn {drop.get('turn_index', '?')}: {drop['reason']} "
             f"({drop.get('speaker')})"
         )
+        print(f"    {(drop.get('text') or '')[:120]}")
 
 
 def main() -> int:

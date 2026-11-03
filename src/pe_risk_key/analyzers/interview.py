@@ -38,8 +38,24 @@ CLAIM_SYSTEM_PROMPT = """You extract security claims from an interview transcrip
 1. A claim is a factual assertion by a target-side speaker about the company's security controls, incidents, or assurance.
 2. Questions from the diligence lead are never claims. Do not extract them.
 3. Only extract claims spoken by one of the target speakers listed with the transcript.
-4. Quote the speaker verbatim for every text field; never paraphrase or invent text. Keep text under 500 characters.
-5. claim_type: control_exists (a control is in place), control_coverage (scope or frequency of a control), incident_history (a past incident or its handling), third_party_assurance (audits, reports, vendor assurance), process_maturity (how run or mature a process is)."""
+4. Copy claim text verbatim from a single turn; never paraphrase or invent text. Keep text under 500 characters. Split a multi-sentence answer into separate claims only when each sentence is a distinct assertion.
+5. claim_type: control_exists (a control is in place), control_coverage (scope or frequency of a control), incident_history (a past incident or its handling), third_party_assurance (audits, reports, vendor assurance), process_maturity (how run or mature a process is).
+6. Transcript lines are labeled [turn N | speaker | MM:SS]; use them for context only."""
+
+
+def _locate_claim(
+    text: Any, turns: list[dict[str, Any]]
+) -> tuple[int, dict[str, Any], str] | None:
+    """First turn whose text contains the claim: (index, turn, verified)."""
+    for turn in turns:
+        verified, _ = verify_quote(
+            text,
+            normalize_quote(turn["text"]),
+            max_chars=MAX_CLAIM_CHARS,
+        )
+        if verified is not None:
+            return turn["turn_index"], turn, verified
+    return None
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -209,19 +225,23 @@ def extract_claims(
     target_speakers: list[str],
     mode: Mode = "standard",
 ) -> dict[str, Any]:
-    """Extract verbatim target-side claims; verify each against its turn.
+    """Extract verbatim target-side claims; locate each turn in code.
+
+    The model returns only text and claim_type. Each claim is searched
+    across target-speaker turns; turn_index, timestamp, and speaker come
+    from the containing turn. Claims found only in non-target turns drop
+    as not_target_speaker; claims found nowhere drop as unquoted.
 
     Returns ``{claims, dropped_unquoted, dropped_not_target, usage,
     estimated_cost_usd}``. ``claims`` holds ``{claim_index, speaker,
-    turn_index, timestamp, text, claim_type}`` with the timestamp taken
-    from the turn.
+    turn_index, timestamp, text, claim_type}``.
     """
     turns = transcript.get("turns", [])
     targets = list(target_speakers)
     lines = [
-        f"[{turn['start']}] "
-        f"{turn.get('speaker_name') or turn['speaker_label']}: "
-        f"{turn['text']}"
+        f"[turn {turn['turn_index']} | "
+        f"{turn.get('speaker_name') or turn['speaker_label']} | "
+        f"{turn['start']}]: {turn['text']}"
         for turn in turns
     ]
     client = ModelClient(role="claim_extraction", mode=mode)
@@ -243,53 +263,49 @@ def extract_claims(
     claims: list[dict[str, Any]] = []
     dropped_unquoted: list[dict[str, Any]] = []
     dropped_not_target: list[dict[str, Any]] = []
+    target_turns = [
+        turn for turn in turns if turn.get("speaker_name") in targets
+    ]
+    other_turns = [
+        turn for turn in turns if turn.get("speaker_name") not in targets
+    ]
+    target_text = " ".join(
+        normalize_quote(turn["text"]) for turn in target_turns
+    )
     for raw in result.get("claims", []):
-        index = raw.get("turn_index")
-        if (
-            not isinstance(raw, dict)
-            or not isinstance(index, int)
-            or isinstance(index, bool)
-            or not 0 <= index < len(turns)
-        ):
-            dropped_not_target.append(
-                {"reason": "bad_turn_index", "claim": raw}
+        text = raw.get("text") if isinstance(raw, dict) else None
+        claim_type = raw.get("claim_type") if isinstance(raw, dict) else None
+        found = _locate_claim(text, target_turns)
+        if found is not None:
+            index, turn, verified = found
+            claims.append(
+                {
+                    "claim_index": len(claims),
+                    "speaker": turn.get("speaker_name"),
+                    "turn_index": index,
+                    "timestamp": turn["start"],
+                    "text": verified,
+                    "claim_type": claim_type,
+                }
             )
             continue
-        turn = turns[index]
-        speaker = turn.get("speaker_name")
-        if speaker not in targets:
+        other = _locate_claim(text, other_turns)
+        if other is not None:
+            index, turn, verified = other
             dropped_not_target.append(
                 {
                     "reason": "not_target_speaker",
                     "turn_index": index,
-                    "speaker": speaker,
+                    "speaker": turn.get("speaker_name"),
+                    "text": verified,
                 }
             )
             continue
-        verified, diagnostics = verify_quote(
-            raw.get("text"),
-            normalize_quote(turn["text"]),
-            max_chars=MAX_CLAIM_CHARS,
+        _, diagnostics = verify_quote(
+            text, target_text, max_chars=MAX_CLAIM_CHARS
         )
-        if verified is None:
-            dropped_unquoted.append(
-                {
-                    "turn_index": index,
-                    "speaker": speaker,
-                    "text": raw.get("text"),
-                    **diagnostics,
-                }
-            )
-            continue
-        claims.append(
-            {
-                "claim_index": len(claims),
-                "speaker": speaker,
-                "turn_index": index,
-                "timestamp": turn["start"],
-                "text": verified[:MAX_CLAIM_CHARS],
-                "claim_type": raw.get("claim_type"),
-            }
+        dropped_unquoted.append(
+            {"text": text, "reason": "unquoted", **diagnostics}
         )
     usage = dict(client.total_usage)
     return {

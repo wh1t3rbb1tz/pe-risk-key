@@ -246,8 +246,9 @@ def soc2_extraction_schema() -> dict[str, Any]:
 def interview_claims_schema() -> dict[str, Any]:
     """Strict-ready schema for security-claim extraction (SPEC §4.3).
 
-    The model returns speaker, turn_index, verbatim text, and claim_type;
-    code adds claim_index and the turn's timestamp afterwards.
+    The model returns verbatim text and claim_type; code locates the
+    containing target turn and adds claim_index, speaker, turn_index,
+    and timestamp.
     """
     return {
         "type": "object",
@@ -260,21 +261,10 @@ def interview_claims_schema() -> dict[str, Any]:
                     "type": "object",
                     "additionalProperties": False,
                     "required": [
-                        "speaker",
-                        "turn_index",
                         "text",
                         "claim_type",
                     ],
                     "properties": {
-                        "speaker": {
-                            "type": "string",
-                            "description": "Speaking target-side participant.",
-                        },
-                        "turn_index": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "description": "Index of the turn the claim is quoted from.",
-                        },
                         "text": {
                             "type": "string",
                             "description": "Verbatim claim text, max 500 chars.",

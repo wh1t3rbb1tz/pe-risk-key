@@ -83,10 +83,8 @@ class _ScriptedInterviewClient:
         type(self).chat_calls.append(
             {"messages": messages, "schema_name": schema_name}
         )
-        assert "claims" in schema["properties"]
-        assert "claim_type" in schema["properties"]["claims"]["items"][
-            "properties"
-        ]
+        item_props = schema["properties"]["claims"]["items"]["properties"]
+        assert set(item_props) == {"text", "claim_type"}
         return copy.deepcopy(type(self).extraction)
 
 
@@ -111,13 +109,8 @@ def interview_env(monkeypatch, tmp_path):
     return audio
 
 
-def _claim(turn_index, text, claim_type="control_exists", speaker=CTO):
-    return {
-        "speaker": speaker,
-        "turn_index": turn_index,
-        "text": text,
-        "claim_type": claim_type,
-    }
+def _claim(text, claim_type="control_exists", **extra):
+    return {"text": text, "claim_type": claim_type, **extra}
 
 
 def test_label_to_name_mapping_in_first_appearance_order(interview_env):
@@ -163,8 +156,8 @@ def test_questions_from_lead_are_never_claims(interview_env):
     )
     _ScriptedInterviewClient.extraction = {
         "claims": [
-            _claim(1, "We enforce MFA for all administrative access to production."),
-            _claim(0, "What controls protect production data?", speaker=LEAD),
+            _claim("We enforce MFA for all administrative access to production."),
+            _claim("What controls protect production data?"),
         ]
     }
     result = extract_claims(transcript, [CTO])
@@ -173,7 +166,12 @@ def test_questions_from_lead_are_never_claims(interview_env):
     assert result["claims"][0]["turn_index"] == 1
     assert result["claims"][0]["timestamp"] == "00:05"
     assert result["dropped_not_target"] == [
-        {"reason": "not_target_speaker", "turn_index": 0, "speaker": LEAD}
+        {
+            "reason": "not_target_speaker",
+            "turn_index": 0,
+            "speaker": LEAD,
+            "text": "What controls protect production data?",
+        }
     ]
     assert result["dropped_unquoted"] == []
 
@@ -184,15 +182,44 @@ def test_fabricated_claim_dropped(interview_env):
     )
     _ScriptedInterviewClient.extraction = {
         "claims": [
-            _claim(3, "We encrypt every database with AES-256."),
+            _claim("We encrypt every database with AES-256."),
         ]
     }
     result = extract_claims(transcript, [CTO])
     assert result["claims"] == []
+    assert result["dropped_not_target"] == []
     (drop,) = result["dropped_unquoted"]
-    assert drop["turn_index"] == 3
-    assert drop["speaker"] == CTO
+    assert drop["reason"] == "unquoted"
+    assert drop["text"] == "We encrypt every database with AES-256."
     assert drop["similarity_ratio"] >= 0.0
+
+
+def test_wrong_model_turn_index_lands_on_located_turn(interview_env):
+    transcript = transcribe_interview(
+        interview_env, "iv_1", speaker_names=[LEAD, CTO]
+    )
+    _ScriptedInterviewClient.extraction = {
+        "claims": [
+            _claim(
+                "We review access quarterly and revoke terminated "
+                "employees within one business day.",
+                turn_index=0,
+                speaker=LEAD,
+            )
+        ]
+    }
+    result = extract_claims(transcript, [CTO])
+    (claim,) = result["claims"]
+    assert claim["turn_index"] == 3
+    assert claim["timestamp"] == "00:30"
+    assert claim["speaker"] == CTO
+    assert result["dropped_unquoted"] == []
+    assert result["dropped_not_target"] == []
+    user_content = _ScriptedInterviewClient.chat_calls[0]["messages"][1][
+        "content"
+    ]
+    assert "[turn 3 | Dana Reyes (CTO) | 00:30]:" in user_content
+    assert "[turn 0 | Diligence Lead | 00:00]:" in user_content
 
 
 def test_claim_timestamp_format_and_claim_type_enum(interview_env):
@@ -204,7 +231,6 @@ def test_claim_timestamp_format_and_claim_type_enum(interview_env):
     _ScriptedInterviewClient.extraction = {
         "claims": [
             _claim(
-                3,
                 "We review access quarterly and revoke terminated "
                 "employees within one business day.",
                 claim_type="control_coverage",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import string
 import threading
@@ -126,6 +127,7 @@ class RunContext:
             parallel_group=parallel_group,
             duration_ms=duration_ms,
             status=status,
+            served_from_fixture=os.getenv("DEMO_MODE") == "1",
         )
         self.outputs[tool_name] = output
         return output

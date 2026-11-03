@@ -252,6 +252,22 @@ def _parse_submission(call: dict[str, Any]) -> list[Any]:
     return findings if isinstance(findings, list) else []
 
 
+def _finding_briefs(submitted: list[Any]) -> list[dict[str, Any]]:
+    """Per-finding id/title/severity for the submit_findings event."""
+    briefs = []
+    for finding in submitted:
+        if not isinstance(finding, dict):
+            continue
+        briefs.append(
+            {
+                "finding_id": finding.get("finding_id"),
+                "title": finding.get("title"),
+                "severity": finding.get("severity"),
+            }
+        )
+    return briefs
+
+
 _FINDING_ID_RE = re.compile(r"^F-(\d+)$")
 _EVIDENCE_ID_RE = re.compile(r"^E-(\d+)$")
 
@@ -336,7 +352,9 @@ def _run_soc2_analysis(
             key: result.usage.get(key, 0)
             for key in ("prompt_tokens", "completion_tokens", "cached_tokens")
         },
+        cost_usd=result.estimated_cost_usd,
         finding_count=len(result.findings),
+        exception_count=len(result.soc2_analysis["exceptions"]),
     )
     return result
 
@@ -434,6 +452,7 @@ def _run_interview(
         audio_seconds=transcript["duration_seconds"],
         cached=transcript["cached"],
         estimated_cost_usd=transcript["estimated_cost_usd"],
+        cost_usd=transcript["estimated_cost_usd"],
     )
     claims_result = extract_claims(transcript, target_speakers)
     ctx.trace.event(
@@ -446,6 +465,7 @@ def _run_interview(
             key: claims_result["usage"].get(key, 0)
             for key in ("prompt_tokens", "completion_tokens", "cached_tokens")
         },
+        cost_usd=claims_result["estimated_cost_usd"],
     )
     return transcript, claims_result
 
@@ -644,6 +664,10 @@ def run_digest(
         revenue_band=revenue_band,
         industry=industry,
         mode=mode,
+        soc2_filename=Path(soc2_path).name if soc2_path is not None else None,
+        interview_filename=Path(interview_path).name
+        if interview_path is not None
+        else None,
     )
     scoring = yaml.safe_load(SCORING_PATH.read_text(encoding="utf-8"))
     rules_yaml = yaml.safe_dump({"rules": scoring["rules"]}, sort_keys=False)
@@ -703,7 +727,12 @@ def run_digest(
                 messages, reasoning_effort="medium", tools=tools
             )
             tokens = _usage_of(response)
-            ctx.trace.event("model_turn_end", turn=turn, tokens=tokens)
+            ctx.trace.event(
+                "model_turn_end",
+                turn=turn,
+                tokens=tokens,
+                cost_usd=estimate_cost(tokens),
+            )
             message = response.choices[0].message
             text = _message_text(message)
             calls = _message_tool_calls(message)
@@ -728,7 +757,10 @@ def run_digest(
             if submit is not None:
                 submitted = _parse_submission(submit)
                 ctx.trace.event(
-                    "submit_findings", turn=turn, count=len(submitted)
+                    "submit_findings",
+                    turn=turn,
+                    count=len(submitted),
+                    findings=_finding_briefs(submitted),
                 )
                 messages.append(
                     {
@@ -770,7 +802,10 @@ def run_digest(
                 )
                 tokens = _usage_of(response)
                 ctx.trace.event(
-                    "model_turn_end", turn="resubmission", tokens=tokens
+                    "model_turn_end",
+                    turn="resubmission",
+                    tokens=tokens,
+                    cost_usd=estimate_cost(tokens),
                 )
                 message = response.choices[0].message
                 resubmit_calls = _message_tool_calls(message)
@@ -802,6 +837,7 @@ def run_digest(
                         "submit_findings",
                         turn="resubmission",
                         count=len(submitted),
+                        findings=_finding_briefs(submitted),
                     )
     finally:
         pool.shutdown(wait=True)
@@ -909,8 +945,12 @@ def run_digest(
         )
         if claims:
             ctx.trace.event("stage", stage="cross_checking")
+            crosscheck_started = time.monotonic()
             crosscheck_result = crosscheck_claims(
                 claims, merged, evidence_pool
+            )
+            crosscheck_duration_ms = round(
+                (time.monotonic() - crosscheck_started) * 1000, 1
             )
             pre_merge = crosscheck_result["contradictions"]
             contradictions, members = merge_contradictions(
@@ -918,6 +958,20 @@ def run_digest(
             )
             ctx.trace.event(
                 "claims_merged", before=len(pre_merge), after=len(contradictions)
+            )
+            ctx.trace.event(
+                "crosscheck_complete",
+                duration_ms=crosscheck_duration_ms,
+                tokens={
+                    key: crosscheck_result["usage"].get(key, 0)
+                    for key in (
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "cached_tokens",
+                    )
+                },
+                cost_usd=crosscheck_result["estimated_cost_usd"],
+                contradiction_count=len(contradictions),
             )
             finding_by_id = {
                 finding["finding_id"]: finding for finding in merged
@@ -1037,6 +1091,7 @@ def run_digest(
         attempts=attempts,
         duration_ms=narrative_duration_ms,
         usage=narrative_result["usage"],
+        cost_usd=narrative_result["estimated_cost_usd"],
         **(
             {
                 "first_attempt_errors": narrative_result[

@@ -1126,6 +1126,114 @@ def _run_interview_digest(agent_env, monkeypatch, tmp_path):
     )
 
 
+def _run_full_digest(agent_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    _ScriptedSoc2Client.extraction = _soc2_extraction()
+    _ScriptedSoc2Client.calls = []
+    monkeypatch.setattr(soc2_module, "ModelClient", _ScriptedSoc2Client)
+    _ScriptedInterviewClient.extraction = {
+        "claims": [
+            {"text": "DMARC is enforced.", "claim_type": "control_exists"},
+            {
+                "text": "We have immutable backups.",
+                "claim_type": "control_exists",
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        interview_module, "ModelClient", _ScriptedInterviewClient
+    )
+    monkeypatch.setattr(
+        interview_module, "CACHE_DIR", tmp_path / "transcripts"
+    )
+    _ScriptedCrosscheckClient.verdicts = [
+        {
+            "claim_index": 0,
+            "verdict": "contradicted",
+            "evidence_refs": ["F-002"],
+            "explanation": "DMARC finding contradicts the claim.",
+        },
+        {
+            "claim_index": 1,
+            "verdict": "supported",
+            "evidence_refs": ["E-001"],
+            "explanation": "Backup evidence corroborates the claim.",
+        },
+    ]
+    monkeypatch.setattr(
+        crosscheck_module, "ModelClient", _ScriptedCrosscheckClient
+    )
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {
+            "content": "Submitting.",
+            "tool_calls": [_submit(_finding(), _dmarc_finding())],
+        },
+    ]
+    report = tmp_path / "acme_soc2.md"
+    report.write_text(_SOC2_REPORT_TEXT, encoding="utf-8")
+    audio = tmp_path / "cto.wav"
+    audio.write_bytes(b"RIFFfake-wav-bytes")
+    return run_digest(
+        DOMAIN,
+        "Acme",
+        "201-1000",
+        "50M-250M",
+        soc2_path=report,
+        as_of="2026-10-30",
+        interview_path=audio,
+        speaker_names=[CTO_NAME],
+        target_speakers=[CTO_NAME],
+    )
+
+
+def test_model_end_events_carry_cost_summing_to_run_end(
+    agent_env, monkeypatch, tmp_path
+):
+    result = _run_full_digest(agent_env, monkeypatch, tmp_path)
+    trace = _read_trace(result)
+    costed = (
+        "model_turn_end",
+        "document_analysis_end",
+        "transcription_end",
+        "claims_extracted",
+        "crosscheck_complete",
+        "narrative_complete",
+    )
+    seen: dict[str, list[float]] = {type: [] for type in costed}
+    for event in trace:
+        if event["type"] in seen:
+            assert isinstance(
+                event["cost_usd"], (int, float)
+            ), event["type"]
+            seen[event["type"]].append(event["cost_usd"])
+    for type, costs in seen.items():
+        assert costs, f"no {type} in trace"
+    total = next(
+        event for event in trace if event["type"] == "run_end"
+    )["usage"]["estimated_cost_usd"]
+    assert sum(sum(costs) for costs in seen.values()) == pytest.approx(
+        total
+    )
+
+
 def test_interview_digest_validates_with_contradictions(
     agent_env, monkeypatch, tmp_path
 ):

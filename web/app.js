@@ -75,16 +75,23 @@ const STAGE_LABELS = {
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 const VERDICT_RANK = { contradicted: 0, unsupported: 1, supported: 2 };
 const CONTROL_RE = /\b((?:CC|A|C|PI|P)\d+\.\d+)\b/;
+const CITE_RE = /\[((?:F|C)-\d{3})\]/g;
 
 const $ = (id) => document.getElementById(id);
 const REDUCED_MOTION = window.matchMedia(
   "(prefers-reduced-motion: reduce)"
 ).matches;
+const PRESENT = new URLSearchParams(window.location.search).has("present");
 
 /* Per-run state, reset by resetRun(). */
 let runId = null;
 let eventSource = null;
 let streamDone = false;
+let isReplay = false;
+let nextChipAt = 0;
+let chipTimers = [];
+let evidence = null;
+let interviewDurEl = null;
 let seenSeq = new Set();
 let verdictQueue = [];
 let verdictTimer = null;
@@ -150,6 +157,12 @@ function addTokens(tokens) {
   if (!tokens) return;
   totalTokens +=
     (tokens.prompt_tokens || 0) + (tokens.completion_tokens || 0);
+  updateTicker();
+}
+
+function addCost(costUsd) {
+  if (costUsd === null || costUsd === undefined) return;
+  runCost = (runCost || 0) + costUsd;
   updateTicker();
 }
 
@@ -287,6 +300,10 @@ async function loadRuns(autoselect) {
   $("older-runs").hidden = olderCount === 0;
   $("older-summary").textContent =
     "Older / incomplete runs (" + olderCount + ")";
+  if (runId) {
+    const stillThere = [...picker.options].some((o) => o.value === runId);
+    picker.value = stillThere ? runId : "";
+  }
   if (autoselect) {
     const newest = (body.digests || []).find((entry) => entry.complete);
     if (newest) {
@@ -444,8 +461,14 @@ function resetRun() {
     clearInterval(memoTimer);
     memoTimer = null;
   }
+  for (const timer of chipTimers) clearTimeout(timer);
+  chipTimers = [];
+  nextChipAt = 0;
   runId = null;
   streamDone = false;
+  isReplay = false;
+  evidence = { signals: 0, exceptions: 0, claims: 0, findings: 0 };
+  interviewDurEl = null;
   seenSeq = new Set();
   verdictQueue = [];
   shownVerdicts = new Set();
@@ -463,6 +486,12 @@ function resetRun() {
   $("conn-status").hidden = true;
   $("rail-error").hidden = true;
   $("decision").replaceChildren();
+  $("target-card").hidden = true;
+  $("target-card").replaceChildren();
+  $("evidence-panel").hidden = true;
+  $("evidence-counters").replaceChildren();
+  $("evidence-findings").replaceChildren();
+  $("demo-note").hidden = true;
   $("plan").hidden = true;
   $("plan").replaceChildren();
   $("tool-groups").replaceChildren();
@@ -539,6 +568,7 @@ function showRailError(message) {
 function subscribe(id, replay) {
   if (eventSource) eventSource.close();
   streamDone = false;
+  isReplay = replay;
   let url = `/api/digests/${id}/events`;
   if (replay) url += "?replay=1";
   const conn = $("conn-status");
@@ -618,7 +648,11 @@ function handleEvent(event) {
     seenSeq.add(event.seq);
   }
   const type = event.type;
-  if (type === "plan") {
+  if (type === "run_start") {
+    renderTargetCard(event);
+    $("evidence-panel").hidden = false;
+    renderEvidence();
+  } else if (type === "plan") {
     const plan = $("plan");
     plan.textContent = event.text || "";
     plan.hidden = false;
@@ -626,11 +660,18 @@ function handleEvent(event) {
     toolChip(event, true);
   } else if (type === "tool_call_end") {
     toolChip(event, false);
+    evidence.signals += 1;
+    renderEvidence();
   } else if (type === "stage") {
     markStage(event.stage);
     stageLane(event.stage);
   } else if (type === "model_turn_end") {
     addTokens(event.tokens);
+    addCost(event.cost_usd);
+  } else if (type === "submit_findings") {
+    evidence.findings = event.count || 0;
+    renderEvidence();
+    renderSubmitted(event.findings || []);
   } else if (type === "engine_adjustment") {
     adjustments.push(event);
     renderAdjustments();
@@ -641,6 +682,7 @@ function handleEvent(event) {
     ensureLane("doc", "Document analysis", true);
   } else if (type === "document_analysis_end") {
     addTokens(event.tokens);
+    addCost(event.cost_usd);
     setLane("doc", "Document analysis", false,
       fmtDuration(event.duration_ms) +
         " · " +
@@ -648,28 +690,30 @@ function handleEvent(event) {
         " · " +
         (event.finding_count || 0) +
         " findings");
+    evidence.exceptions = event.exception_count || 0;
+    renderEvidence();
   } else if (type === "transcription_start") {
     ensureLane("transcribe", "Transcription", true);
   } else if (type === "transcription_end") {
-    const cached = event.cached ? "cached" : "live";
+    addCost(event.cost_usd);
+    const audio = Math.round(event.audio_seconds || 0) + "s audio";
     setLane("transcribe", "Transcription", false,
-      fmtDuration(event.duration_ms) +
-        " · " +
-        Math.round(event.audio_seconds || 0) +
-        "s audio (" +
-        cached +
-        ") · " +
-        fmtCost(event.estimated_cost_usd));
-    if (event.estimated_cost_usd) {
-      runCost = (runCost || 0) + event.estimated_cost_usd;
-      updateTicker();
+      event.cached
+        ? "cached · " + audio
+        : fmtDuration(event.duration_ms) + " · " + audio);
+    if (interviewDurEl) {
+      interviewDurEl.textContent =
+        interviewDurEl.textContent + " · " + audio;
     }
   } else if (type === "claims_extracted") {
     addTokens(event.tokens);
+    addCost(event.cost_usd);
     setLane("extract", "Claim extraction", false,
       (event.claim_count || 0) +
         " claims · " +
         fmtTokensDict(event.tokens));
+    evidence.claims = event.claim_count || 0;
+    renderEvidence();
   } else if (type === "crosscheck_verdict") {
     crossCounts[event.verdict] = (crossCounts[event.verdict] || 0) + 1;
     updateCrossLane();
@@ -681,8 +725,19 @@ function handleEvent(event) {
     setLane("scoring", "Scoring", false, "deterministic");
   } else if (type === "digest_preview") {
     renderPreview(event.digest);
+  } else if (type === "crosscheck_complete") {
+    addTokens(event.tokens);
+    addCost(event.cost_usd);
+    setLane("crosscheck", "Cross-check", false,
+      fmtDuration(event.duration_ms) +
+        " · " +
+        fmtTokensDict(event.tokens) +
+        " · " +
+        (event.contradiction_count || 0) +
+        " verdicts");
   } else if (type === "narrative_complete") {
     addTokens(event.usage);
+    addCost(event.cost_usd);
     let meta =
       fmtDuration(event.duration_ms) +
       " · " +
@@ -703,6 +758,81 @@ function handleEvent(event) {
       runCost = usage.estimated_cost_usd;
       updateTicker();
     }
+  }
+}
+
+function renderTargetCard(event) {
+  const card = $("target-card");
+  card.replaceChildren();
+  card.hidden = false;
+  card.appendChild(
+    el(
+      "div",
+      "target-title",
+      (event.company_name || "?") + " · " + (event.domain || "?")
+    )
+  );
+  const bits = [];
+  if (event.industry) bits.push(event.industry);
+  if (event.employee_band) bits.push(event.employee_band + " employees");
+  if (event.revenue_band) bits.push("$" + event.revenue_band + " revenue");
+  if (bits.length) card.appendChild(el("div", "target-sub", bits.join(" · ")));
+  const chips = el("div", "target-chips");
+  chips.appendChild(el("span", "src-chip", "Outside-in"));
+  if (event.soc2_filename) {
+    chips.appendChild(
+      el("span", "src-chip", "SOC 2 report · " + event.soc2_filename)
+    );
+  }
+  if (event.interview_filename) {
+    interviewDurEl = el(
+      "span",
+      "src-chip",
+      "Management interview · " + event.interview_filename
+    );
+    chips.appendChild(interviewDurEl);
+  }
+  card.appendChild(chips);
+}
+
+function renderEvidence() {
+  const wrap = $("evidence-counters");
+  wrap.replaceChildren();
+  const cells = [
+    [evidence.signals, "signals collected"],
+    [evidence.exceptions, "SOC 2 exceptions"],
+    [evidence.claims, "claims extracted"],
+    [evidence.findings, "findings submitted"],
+  ];
+  for (const [value, label] of cells) {
+    const cell = el("div", "ev-stat");
+    cell.appendChild(el("div", "ev-num", String(value)));
+    cell.appendChild(el("div", "ev-label", label));
+    wrap.appendChild(cell);
+  }
+}
+
+function renderSubmitted(briefs) {
+  const list = $("evidence-findings");
+  list.replaceChildren();
+  for (const brief of briefs) {
+    const item = el("li");
+    item.appendChild(sevBadge(brief.severity));
+    item.appendChild(el("span", null, " " + (brief.title || brief.finding_id || "?")));
+    list.appendChild(item);
+  }
+}
+
+function finishChip(chip, event) {
+  chip.classList.remove("running");
+  chip.classList.add(event.status === "error" ? "error" : "done");
+  chip.textContent = "";
+  chip.appendChild(el("span", null, event.tool || "?"));
+  if (event.served_from_fixture) {
+    chip.appendChild(el("span", "fixture-tag", " fixture"));
+    $("demo-note").hidden = false;
+  } else {
+    chip.appendChild(el("span", "dur", " " + fmtDuration(event.duration_ms)));
   }
 }
 
@@ -730,11 +860,17 @@ function toolChip(event, running) {
       "group " + group + " · parallel ×" + groupCounts[group];
   }
   if (!running) {
-    chip.classList.remove("running");
-    chip.classList.add(event.status === "error" ? "error" : "done");
-    chip.textContent = "";
-    chip.appendChild(el("span", null, event.tool || "?"));
-    chip.appendChild(el("span", "dur", " " + fmtDuration(event.duration_ms)));
+    if (isReplay && !REDUCED_MOTION) {
+      const now = Date.now();
+      nextChipAt = Math.max(now, nextChipAt + 400);
+      const target = chip;
+      const snapshot = { ...event };
+      chipTimers.push(
+        setTimeout(() => finishChip(target, snapshot), nextChipAt - now)
+      );
+    } else {
+      finishChip(chip, event);
+    }
   }
 }
 
@@ -870,6 +1006,41 @@ function sevBadge(severity) {
   return el("span", "sev sev-" + (severity || "info"), severity || "info");
 }
 
+function scrollToCite(ref) {
+  const target = $(ref.startsWith("F-") ? "finding-" + ref : "claim-" + ref);
+  if (!target) return;
+  target.scrollIntoView({
+    block: "nearest",
+    behavior: REDUCED_MOTION ? "auto" : "smooth",
+  });
+  target.classList.remove("flash-target");
+  void target.offsetWidth;
+  target.classList.add("flash-target");
+  setTimeout(() => target.classList.remove("flash-target"), 1500);
+}
+
+function appendCitedText(container, text) {
+  CITE_RE.lastIndex = 0;
+  let last = 0;
+  let match;
+  while ((match = CITE_RE.exec(text || "")) !== null) {
+    if (match.index > last) {
+      container.appendChild(
+        document.createTextNode(text.slice(last, match.index))
+      );
+    }
+    const ref = match[1];
+    const chip = el("button", "cite-chip", ref);
+    chip.type = "button";
+    chip.addEventListener("click", () => scrollToCite(ref));
+    container.appendChild(chip);
+    last = match.index + match[0].length;
+  }
+  if (last < (text || "").length) {
+    container.appendChild(document.createTextNode(text.slice(last)));
+  }
+}
+
 function verdictBadge(verdict) {
   return el(
     "span",
@@ -910,6 +1081,7 @@ function resolveRef(ref) {
 
 function verdictCardLive(event) {
   const card = el("div", "claim-card" + (REDUCED_MOTION ? "" : " enter"));
+  if (event.contradiction_id) card.id = "claim-" + event.contradiction_id;
   if (event.verdict === "supported") card.classList.add("supported");
   const head = el("div", "claim-head");
   head.appendChild(el("span", "cid", event.contradiction_id || ""));
@@ -935,6 +1107,7 @@ function verdictCardLive(event) {
 
 function verdictCardFull(contra) {
   const card = el("div", "claim-card");
+  if (contra.contradiction_id) card.id = "claim-" + contra.contradiction_id;
   if (contra.verdict === "supported") card.classList.add("supported");
   const head = el("div", "claim-head");
   head.appendChild(el("span", "cid", contra.contradiction_id || ""));
@@ -1099,6 +1272,7 @@ function memoPlaceholder() {
 
 function renderPreview(digest) {
   previewDigest = digest;
+  $("evidence-panel").hidden = true;
   indexDigest(digest);
   renderDecision(digest, true);
   $("summary-panel").hidden = false;
@@ -1131,9 +1305,9 @@ function renderFinal(digest) {
   previewDigest = digest;
   const narrative = digest.narrative || {};
   $("summary-panel").hidden = false;
-  $("summary-body").replaceChildren(
-    el("p", null, narrative.executive_summary || "")
-  );
+  const summaryBody = el("p");
+  appendCitedText(summaryBody, narrative.executive_summary || "");
+  $("summary-body").replaceChildren(summaryBody);
   const hasInterview = (digest.inputs?.interviews || []).length > 0;
   $("claims-panel").hidden = false;
   $("claims-note").hidden = hasInterview;
@@ -1171,6 +1345,7 @@ function renderRisks(digest) {
   });
   for (const finding of findings) {
     const row = el("div", "risk-row");
+    if (finding.finding_id) row.id = "finding-" + finding.finding_id;
     const head = el("button", "risk-head");
     head.type = "button";
     head.appendChild(sevBadge(finding.severity));
@@ -1367,7 +1542,9 @@ function renderRecs(digest) {
     const group = el("div", "rec-group");
     group.appendChild(el("h4", null, REC_LABELS[type] || type));
     for (const rec of groups[type]) {
-      group.appendChild(el("p", "rec", rec.text || ""));
+      const recPara = el("p", "rec");
+      appendCitedText(recPara, rec.text || "");
+      group.appendChild(recPara);
       group.appendChild(
         el("div", "rec-basis", "basis: " + (rec.basis_ids || []).join(", "))
       );
@@ -1383,7 +1560,9 @@ function renderQuestions(digest) {
   const wrap = $("questions");
   wrap.replaceChildren();
   for (const question of questions) {
-    wrap.appendChild(el("li", null, question));
+    const item = el("li");
+    appendCitedText(item, question);
+    wrap.appendChild(item);
   }
 }
 
@@ -1468,6 +1647,7 @@ async function openFailedRun(id) {
 /* ---- boot ---- */
 
 function boot() {
+  if (PRESENT) document.body.classList.add("present");
   $("new-digest-btn").addEventListener("click", openDrawer);
   $("drawer-cancel").addEventListener("click", closeDrawer);
   $("load-demo-btn").addEventListener("click", () => {

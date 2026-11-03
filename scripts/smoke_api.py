@@ -50,6 +50,11 @@ def _detail(event: dict[str, Any]) -> str:
         return f"{event.get('finding_id', '')} {event.get('field', '')}"
     if event_type == "claims_merged":
         return f"{event.get('before', '?')}->{event.get('after', '?')}"
+    if event_type == "crosscheck_complete":
+        return (
+            f"{event.get('contradiction_count', '?')} verdicts "
+            f"cost=${event.get('cost_usd', '?')}"
+        )
     if event_type == "scoring_complete":
         overall = event.get("overall") or {}
         return f"rating={overall.get('rating', '?')}"

@@ -293,6 +293,20 @@ def test_app_js_api_paths_exist_in_routes():
     assert refs <= routes, f"missing routes for {sorted(refs - routes)}"
 
 
+def test_app_js_selectors_are_native():
+    web_app = (
+        Path(api.__file__).resolve().parents[3] / "web" / "app.js"
+    )
+    selectors = re.findall(
+        r"""(?:querySelectorAll|querySelector|matches|closest)"""
+        r"""\(\s*["'`]([^"'`]*)["'`]""",
+        web_app.read_text(encoding="utf-8"),
+    )
+    assert selectors, "no selectors found in app.js"
+    bad = [s for s in selectors if "!=" in s]
+    assert not bad, f"non-native selectors: {bad}"
+
+
 def test_digest_memo_trace_endpoints(client, api_env):
     run_dir = _run_dir(api_env)
     (run_dir / "digest.json").write_text(

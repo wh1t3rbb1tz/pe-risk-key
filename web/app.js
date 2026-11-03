@@ -163,8 +163,23 @@ function updateTicker() {
   if (decCost) decCost.textContent = fmtCost(runCost);
 }
 
+function apiError(status, detail) {
+  const error = new Error(
+    "Could not reach the API (status " + status + ")"
+  );
+  error.isApiError = true;
+  error.status = status;
+  error.detail = detail;
+  return error;
+}
+
 async function api(path, options) {
-  const response = await fetch(path, options);
+  let response;
+  try {
+    response = await fetch(path, options);
+  } catch (err) {
+    throw apiError("unreachable", String((err && err.message) || err));
+  }
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -173,9 +188,16 @@ async function api(path, options) {
     } catch (_) {
       /* keep status text */
     }
-    throw new Error(path + ": " + detail);
+    throw apiError(response.status, path + ": " + detail);
   }
   return response.json();
+}
+
+function displayError(err) {
+  console.error((err && err.stack) || err);
+  showRailError(
+    "Display error: " + String((err && err.message) || err)
+  );
 }
 
 /* ---- run list + picker ---- */
@@ -185,7 +207,9 @@ async function loadRuns() {
   costByDigest = {};
   statusByDigest = {};
   const picker = $("run-picker");
-  picker.querySelectorAll("option[value!='']").forEach((o) => o.remove());
+  picker
+    .querySelectorAll('option:not([value=""])')
+    .forEach((o) => o.remove());
   for (const entry of body.digests || []) {
     costByDigest[entry.digest_id] = entry.cost;
     statusByDigest[entry.digest_id] = entry.status;
@@ -214,22 +238,30 @@ async function openRun(id) {
     runCost = costByDigest[id];
     updateTicker();
   }
+  let digest;
   try {
-    const digest = await api(`/api/digests/${id}`);
-    renderFinal(digest);
-    $("replay-btn").hidden = false;
+    digest = await api(`/api/digests/${id}`);
   } catch (err) {
     if (statusByDigest[id] === "failed") {
-      openFailedRun(id).catch((e) => showRailError(String(e)));
-    } else if (
-      String(err).includes("404") ||
-      String(err).includes("Not Found")
-    ) {
+      openFailedRun(id).catch((e) =>
+        e && e.isApiError ? showRailError(e.message) : displayError(e)
+      );
+    } else if (err && err.status === 404) {
       subscribe(id, false);
+    } else if (err && err.isApiError) {
+      showRailError(err.message);
     } else {
-      showRailError(String(err));
+      displayError(err);
     }
+    return;
   }
+  try {
+    renderFinal(digest);
+  } catch (err) {
+    displayError(err);
+    return;
+  }
+  $("replay-btn").hidden = false;
 }
 
 /* ---- new digest drawer ---- */
@@ -445,10 +477,17 @@ function subscribe(id, replay) {
   conn.hidden = false;
   eventSource = new EventSource(url);
   eventSource.onmessage = (message) => {
+    let event;
     try {
-      handleEvent(JSON.parse(message.data));
+      event = JSON.parse(message.data);
     } catch (err) {
       showRailError("Bad event: " + err.message);
+      return;
+    }
+    try {
+      handleEvent(event);
+    } catch (err) {
+      displayError(err);
     }
   };
   eventSource.addEventListener("done", () => finishStream(true, ""));
@@ -487,10 +526,18 @@ function finishStream(ok, detail) {
     loadRuns().catch(() => {});
     api(`/api/digests/${runId}`)
       .then((digest) => {
-        renderFinal(digest);
+        try {
+          renderFinal(digest);
+        } catch (err) {
+          displayError(err);
+          return;
+        }
         $("replay-btn").hidden = false;
       })
-      .catch(() => {});
+      .catch((err) => {
+        if (err && err.isApiError) showRailError(err.message);
+        else displayError(err);
+      });
   }
 }
 
@@ -1330,13 +1377,20 @@ async function openFailedRun(id) {
   $("content").hidden = false;
   $("rail").hidden = false;
   buildRail();
+  let body;
   try {
-    const body = await api(`/api/digests/${id}/trace`);
+    body = await api(`/api/digests/${id}/trace`);
+  } catch (err) {
+    if (err && err.isApiError) showRailError(err.message);
+    else displayError(err);
+    return;
+  }
+  try {
     for (const event of body.events || []) {
       handleEvent(event);
     }
   } catch (err) {
-    showRailError(String(err.message || err));
+    displayError(err);
     return;
   }
   showRailError("Run failed before producing a digest.");
@@ -1357,15 +1411,20 @@ function boot() {
   $("digest-form").addEventListener("submit", submitDigest);
   $("run-picker").addEventListener("change", (event) => {
     const id = event.target.value;
-    if (id) openRun(id).catch((err) => showRailError(String(err)));
+    if (id) openRun(id).catch((err) => displayError(err));
   });
   $("replay-btn").addEventListener("click", replayRun);
   $("adjustments-toggle").addEventListener("click", () => {
     $("adjustments").hidden = !$("adjustments").hidden;
   });
   loadRuns().catch((err) => {
-    $("empty-state").textContent =
-      "Could not reach the API: " + (err.message || err);
+    if (err && err.isApiError) {
+      $("empty-state").textContent = err.message;
+    } else {
+      console.error((err && err.stack) || err);
+      $("empty-state").textContent =
+        "Display error: " + String((err && err.message) || err);
+    }
   });
 }
 

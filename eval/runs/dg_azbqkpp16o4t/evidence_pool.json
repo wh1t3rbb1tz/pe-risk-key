@@ -1,0 +1,12 @@
+{
+  "evidence": [
+    {
+      "evidence_id": "E-001",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "staging.copperline.example",
+      "excerpt": "CT logs list risky hostname staging.copperline.example with pattern 'staging', first_seen 2025-03-02, last_seen 2026-09-15; risky_hostnames_count 1, unique_hostnames 12."
+    }
+  ]
+}

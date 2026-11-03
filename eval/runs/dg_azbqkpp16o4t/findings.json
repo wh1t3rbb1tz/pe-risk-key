@@ -1,0 +1,31 @@
+{
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "rule_id": "SURFACE-RISKY-HOSTS",
+      "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems",
+      "severity": "medium",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-001",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "staging.copperline.example",
+          "excerpt": "CT logs list risky hostname staging.copperline.example with pattern 'staging', first_seen 2025-03-02, last_seen 2026-09-15; risky_hostnames_count 1, unique_hostnames 12."
+        }
+      ],
+      "deal_impact": "A publicly logged staging system may expose non-production data or weaker controls and expand attack surface; validate its access controls and need before close, with limited expected deal impact if isolated or decommissioned.",
+      "remediation": {
+        "summary": "Confirm staging host is required, restrict to VPN/allowlist or decommission, and ensure no production data or credentials are present.",
+        "cost_low_usd": 7000,
+        "cost_high_usd": 35000,
+        "effort_weeks": 6
+      }
+    }
+  ]
+}

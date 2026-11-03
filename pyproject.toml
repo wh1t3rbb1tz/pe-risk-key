@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.162.0",
     "httpx>=0.28.1",
     "jsonschema>=4.26.0",
+    "mcp>=2.3.0",
     "openai>=3.40.0",
     "pydantic>=2.14.1",
     "pypdf>=6.21.4",

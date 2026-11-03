@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pe-risk-key": {
+      "command": "/absolute/path/to/pe-risk-key/.venv/bin/python",
+      "args": ["-m", "pe_risk_key.mcp_server"],
+      "cwd": "/absolute/path/to/pe-risk-key"
+    }
+  }
+}

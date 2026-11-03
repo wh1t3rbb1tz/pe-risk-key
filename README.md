@@ -60,6 +60,28 @@ in `.env`):
   --employee-band 201-1000 --revenue-band 50M-250M
 ```
 
+## MCP server
+
+`src/pe_risk_key/mcp_server.py` exposes saved digests over MCP (stdio)
+for a PE associate’s AI assistant. It is read-only: it reads
+`eval/runs/*/digest.json` and never triggers new runs or network calls.
+
+Tools: `list_digests` (finished runs, newest first), `get_risk_digest`
+(latest run for a domain or digest id: rating, decision, top risks,
+contradictions, summary), `explain_finding` (evidence, remediation,
+citing claims), and `compare_targets` (2–3 targets side by side with a
+deterministic relative-risk ranking; no model calls).
+
+To use it, copy `scripts/mcp_config_example.json` into your MCP client
+config (Claude Desktop or any generic client), replacing the absolute
+paths with your checkout. Test the server directly with:
+
+```sh
+.venv/bin/python -m pe_risk_key.mcp_server
+```
+
+which speaks MCP over stdio.
+
 ## Known limitations
 
 - KEV matches are product-level (no version-range check);

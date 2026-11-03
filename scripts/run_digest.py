@@ -87,7 +87,42 @@ def print_recall(findings: list[dict], domain: str) -> None:
     print(f"must_not_find hits: {sorted(got & must) or '-'}")
 
 
-def print_contradiction_recall(contradictions: list[dict], domain: str) -> None:
+def print_contradictions(
+    contradictions: list[dict], claim_count: int | None = None
+) -> None:
+    print(f"\ncontradictions ({len(contradictions)}):")
+    if not contradictions:
+        print("  -")
+    for contradiction in contradictions:
+        claim = contradiction["claim"]
+        refs = ", ".join(contradiction["evidence_refs"]) or "-"
+        print(
+            f"  {contradiction['contradiction_id']} "
+            f"[{contradiction['verdict']}/{contradiction['severity']}] "
+            f"refs={refs}: {claim['text']}"
+        )
+        print(f"    {contradiction['explanation'][:120]}")
+    if claim_count is not None:
+        print(f"claims extracted: {claim_count}")
+
+
+def print_catalog(catalog: dict | None) -> None:
+    if not catalog:
+        return
+    print(
+        f"\nevidence catalog: findings={catalog['findings']} "
+        f"outside_in={catalog['outside_in_evidence']} "
+        f"soc2_exceptions={catalog['soc2_exceptions']} "
+        f"soc2_no_exception={catalog['soc2_no_exception']} "
+        f"soc2_notables={catalog['soc2_notables']}"
+    )
+
+
+def print_contradiction_recall(
+    contradictions: list[dict],
+    domain: str,
+    context_questions: dict[str, str] | None = None,
+) -> None:
     expected_path = ROOT / "fixtures" / "expected" / f"{domain}.yaml"
     if not expected_path.exists():
         print(f"\ncontradictions: no expected file for {domain}, skipped")
@@ -97,21 +132,22 @@ def print_contradiction_recall(contradictions: list[dict], domain: str) -> None:
     if not wanted:
         print("\ncontradictions: no contradiction expectations")
         return
+    questions = context_questions or {}
     matched = 0
     correct = 0
     misses: list[str] = []
     wrong: list[str] = []
     for entry in wanted:
         pattern = entry.get("match_keywords", "")
-        hit = next(
-            (
-                c
-                for c in contradictions
-                if pattern
-                and re.search(pattern, c["claim"]["text"], re.IGNORECASE)
-            ),
-            None,
-        )
+
+        def _matches(contradiction: dict) -> bool:
+            if not pattern:
+                return False
+            text = contradiction["claim"]["text"]
+            haystack = text + "\n" + questions.get(text, "")
+            return bool(re.search(pattern, haystack, re.IGNORECASE))
+
+        hit = next((c for c in contradictions if _matches(c)), None)
         label = f"claim {entry.get('claim_ref')}: {entry.get('topic')}"
         if hit is None:
             misses.append(label)
@@ -159,6 +195,11 @@ def print_usage(usage: dict) -> None:
     for name, component in usage.get("components", {}).items():
         if "audio_hours" in component:
             detail = f"audio={component['audio_hours']:.2f}h"
+            if component.get("cached"):
+                detail += (
+                    " cached (first run "
+                    f"${component.get('first_run_cost_usd', 0):.4f})"
+                )
         else:
             detail = (
                 f"input={component.get('prompt_tokens', 0)} "
@@ -252,7 +293,26 @@ def main() -> int:
     digest = json.loads(digest_path.read_text(encoding="utf-8"))
     print_soc2_summary(digest)
     print_digest_summary(digest)
-    print_contradiction_recall(digest["contradictions"], args.domain)
+    print_catalog(result.get("catalog"))
+    extracted = next(
+        (e for e in trace if e["type"] == "claims_extracted"), None
+    )
+    print_contradictions(
+        digest["contradictions"],
+        extracted["claim_count"] if extracted else None,
+    )
+    run_dir = Path(result["trace_path"]).parent
+    claims_path = run_dir / "claims.json"
+    questions: dict[str, str] = {}
+    if claims_path.exists():
+        claims_data = json.loads(claims_path.read_text(encoding="utf-8"))
+        questions = {
+            claim["text"]: claim.get("context_question") or ""
+            for claim in claims_data.get("claims", [])
+        }
+    print_contradiction_recall(
+        digest["contradictions"], args.domain, questions
+    )
     print(f"saved: {Path(result['trace_path']).parent.relative_to(ROOT)}/")
     return 0
 

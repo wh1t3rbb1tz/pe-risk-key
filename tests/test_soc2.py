@@ -876,3 +876,53 @@ def test_fixture_controls_tested_no_exception_in_pool(soc2_env):
         drop["type"] == "tested_control" and drop["ref"] == "CC5.1-01"
         for drop in result.dropped_unquoted
     )
+
+
+def test_evidence_pool_kinds(soc2_env, tmp_path):
+    client, _ = soc2_env
+    client.extraction = _extraction(
+        controls_tested=[
+            _tested_row(
+                "CC1.1-01", "no_exception", "Result: no deviations noted."
+            )
+        ],
+        subservice_orgs=[],
+        cuecs=[],
+        notable_observations=[],
+        bridge_letter_provided=True,
+    )
+    path = tmp_path / "report.md"
+    path.write_text(SOC_TEXT, encoding="utf-8")
+    result = analyze_soc2(path, "doc_kinds", AS_OF)
+    assert [item["evidence_kind"] for item in result.evidence_pool] == [
+        "exception",
+        "no_exception",
+    ]
+    for finding in result.findings:
+        for item in finding["evidence"]:
+            assert "evidence_kind" not in item
+
+
+def test_fixture_bridge_notable_in_pool(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["notable_observations"] = [
+        {
+            "text": "Bridge letter available on request.",
+            "locator": "Section 5",
+            "quote": (
+                "Management plans to obtain a bridge letter covering "
+                "April 1, 2026 forward upon request."
+            ),
+        }
+    ]
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    notables = [
+        item
+        for item in result.evidence_pool
+        if item.get("evidence_kind") == "notable"
+    ]
+    assert len(notables) == 1
+    assert notables[0]["locator"] == "Section 5"
+    assert "bridge letter" in notables[0]["excerpt"]

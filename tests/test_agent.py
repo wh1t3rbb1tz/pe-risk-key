@@ -337,7 +337,9 @@ def test_max_turns_limit_enforced(agent_env):
         "adjustments",
         "trace_path",
         "usage",
+        "catalog",
     }
+    assert result["catalog"] is None
 
 
 def test_invalid_finding_dropped_and_traced(agent_env, monkeypatch):
@@ -1129,6 +1131,22 @@ def test_interview_digest_validates_with_contradictions(
     assert "No management interview provided" not in digest["limitations"]
     by_function = {e["function"]: e for e in digest["function_scores"]}
     assert by_function["GV"]["assessed"] is True
+    claims_data = json.loads(
+        (Path(result["trace_path"]).parent / "claims.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [c["text"] for c in claims_data["claims"]] == [
+        "DMARC is enforced.",
+        "We have immutable backups.",
+    ]
+    assert result["catalog"] == {
+        "findings": 2,
+        "outside_in_evidence": 2,
+        "soc2_exceptions": 0,
+        "soc2_no_exception": 0,
+        "soc2_notables": 0,
+    }
 
 
 def test_interview_trace_events_per_claim(agent_env, monkeypatch, tmp_path):

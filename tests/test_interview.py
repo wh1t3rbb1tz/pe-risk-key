@@ -148,6 +148,11 @@ def test_transcript_cache_hit_makes_no_call(interview_env, monkeypatch):
     assert second["interview_id"] == "iv_2"
     assert second["turns"] == first["turns"]
     assert second["estimated_cost_usd"] == 0.0
+    assert second["usage"] == {
+        "audio_hours": first["usage"]["audio_hours"],
+        "cached": True,
+        "first_run_cost_usd": first["estimated_cost_usd"],
+    }
 
 
 def test_questions_from_lead_are_never_claims(interview_env):
@@ -399,3 +404,36 @@ def test_raw_response_saved_before_parsing(interview_env):
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
     assert raw["audioDurationMs"] == 65000
     assert len(raw["turns"]) == 4
+
+
+def test_claim_carries_preceding_lead_question(interview_env):
+    transcript = transcribe_interview(
+        interview_env, "iv_1", speaker_names=[LEAD, CTO]
+    )
+    _ScriptedInterviewClient.extraction = {
+        "claims": [
+            _claim("We enforce MFA for all administrative access to production."),
+            _claim(
+                "We review access quarterly and revoke terminated "
+                "employees within one business day."
+            ),
+        ]
+    }
+    result = extract_claims(transcript, [CTO])
+    assert [c["context_question"] for c in result["claims"]] == [
+        "What controls protect production data?",
+        "How often are access reviews performed?",
+    ]
+
+
+def test_claim_in_first_turn_has_no_context_question(interview_env):
+    transcript = transcribe_interview(
+        interview_env, "iv_1", speaker_names=[LEAD, CTO]
+    )
+    _ScriptedInterviewClient.extraction = {
+        "claims": [_claim("What controls protect production data?")]
+    }
+    result = extract_claims(transcript, [LEAD])
+    (claim,) = result["claims"]
+    assert claim["turn_index"] == 0
+    assert claim["context_question"] is None

@@ -21,9 +21,10 @@ from pe_risk_key.providers import (
 SYSTEM_PROMPT = """You cross-check interview claims against assessment evidence. Rules:
 1. Return exactly one verdict per claim: contradicted (evidence conflicts with the claim), unsupported (no evidence either way), supported (evidence corroborates the claim).
 2. supported requires positive evidence that corroborates the claim, not just the absence of contradiction.
-3. CT log presence doesn't prove a host is live: a hostname in certificate logs is not evidence the host exists or is reachable.
-4. Cite evidence_refs using only finding (F-) and evidence (E-) ids from the catalog below.
-5. Keep each explanation under 500 characters."""
+3. CT log presence alone doesn't prove a host is live. However, certificates issued within the last 12 months (last_seen) for a hostname show the system is still actively maintained. That contradicts a claim it was decommissioned in the past; cite it and state the caveat in the explanation.
+4. A SOC 2 control tested with no exceptions is positive evidence that supports a claim about that control.
+5. Cite evidence_refs using only finding (F-) and evidence (E-) ids from the catalog below.
+6. Keep each explanation under 500 characters."""
 
 MAX_EXPLANATION_CHARS = 500
 
@@ -89,11 +90,41 @@ def _catalog(findings: list[dict], evidence_pool: list[dict]) -> str:
         )
     lines.append("Evidence:")
     for item in evidence_pool:
+        excerpt = item.get("excerpt", "")
+        if item.get("evidence_kind") == "no_exception":
+            excerpt = f"control tested, no exceptions: {excerpt}"
         lines.append(
             f"{item.get('evidence_id')} | {item.get('source_type')} | "
-            f"{item.get('locator')} | {item.get('excerpt')}"
+            f"{item.get('locator')} | {excerpt}"
         )
     return "\n".join(lines)
+
+
+def _catalog_counts(
+    findings: list[dict], evidence_pool: list[dict]
+) -> dict[str, int]:
+    """Catalog size by category for run reporting."""
+    return {
+        "findings": len(findings),
+        "outside_in_evidence": sum(
+            1 for item in evidence_pool if item.get("collector") != "soc2_analyzer"
+        ),
+        "soc2_exceptions": sum(
+            1
+            for item in evidence_pool
+            if item.get("evidence_kind") == "exception"
+        ),
+        "soc2_no_exception": sum(
+            1
+            for item in evidence_pool
+            if item.get("evidence_kind") == "no_exception"
+        ),
+        "soc2_notables": sum(
+            1
+            for item in evidence_pool
+            if item.get("evidence_kind") == "notable"
+        ),
+    }
 
 
 def _derive_severity(
@@ -131,9 +162,10 @@ def crosscheck_claims(
 ) -> dict[str, Any]:
     """Judge each claim against the evidence; one contradiction per claim.
 
-    Returns ``{contradictions, usage, estimated_cost_usd}``.
+    Returns ``{contradictions, catalog, usage, estimated_cost_usd}``.
     Contradictions match the digest schema's ``contradiction`` definition
-    and are numbered C-001... in claim order.
+    and are numbered C-001... in claim order. ``catalog`` counts catalog
+    items by category.
     """
     finding_by_id = {
         finding["finding_id"]: finding
@@ -241,6 +273,7 @@ def crosscheck_claims(
     usage = dict(client.total_usage)
     return {
         "contradictions": contradictions,
+        "catalog": _catalog_counts(findings, evidence_pool),
         "usage": usage,
         "estimated_cost_usd": estimate_token_cost_usd(
             usage, WONDER_USD_PER_MTOK

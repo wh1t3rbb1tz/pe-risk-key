@@ -395,9 +395,11 @@ def analyze_soc2(
     rules = _rules_by_id(scoring)
 
     # Evidence pool (numbered first so findings can reference it).
+    # evidence_kind is pool-only metadata for the cross-check catalog;
+    # finding copies strip it since digest evidence is a closed schema.
     pool: list[dict] = []
 
-    def add_evidence(locator: str, excerpt: str) -> dict:
+    def add_evidence(locator: str, excerpt: str, kind: str) -> dict:
         item = {
             "evidence_id": f"E-{offset + len(pool) + 1:03d}",
             "source_type": "document",
@@ -405,28 +407,38 @@ def analyze_soc2(
             "collector": "soc2_analyzer",
             "locator": locator,
             "excerpt": excerpt,
+            "evidence_kind": kind,
         }
         pool.append(item)
         return item
 
+    def finding_evidence(item: dict) -> dict:
+        return {
+            key: value
+            for key, value in copy.deepcopy(item).items()
+            if key != "evidence_kind"
+        }
+
     exception_evidence = [
-        add_evidence(item["locator"], item["quote"]) for item in exceptions
+        add_evidence(item["locator"], item["quote"], "exception")
+        for item in exceptions
     ]
     for tested in controls_tested:
         if tested.get("result") == "no_exception":
-            add_evidence(tested["locator"], tested["quote"])
+            add_evidence(tested["locator"], tested["quote"], "no_exception")
     carve_outs = [org for org in orgs if org.get("method") == "carve_out"]
     carve_evidence = [
         add_evidence(
             org["locator"],
             f"{org['name']} is carved out of scope: {org['services']}.",
+            "carve_out",
         )
         for org in carve_outs
     ]
     for cuec in cuecs:
-        add_evidence(cuec["locator"], cuec["text"])
+        add_evidence(cuec["locator"], cuec["text"], "cuec")
     for notable in notables:
-        add_evidence(notable["locator"], notable["quote"])
+        add_evidence(notable["locator"], notable["quote"], "notable")
 
     # Findings, built in code from scoring.yaml rules.
     draft: list[dict] = []
@@ -447,7 +459,7 @@ def analyze_soc2(
                 "csf_function": rule["csf"].split(".")[0],
                 "csf_category": rule["csf"],
                 "source": "document",
-                "evidence": [copy.deepcopy(exception_evidence[index])],
+                "evidence": [finding_evidence(exception_evidence[index])],
                 "deal_impact": item["deal_impact"],
                 "remediation": {
                     "summary": f"Remediate {item['control_id']} exception: {item['description']}",
@@ -465,6 +477,7 @@ def analyze_soc2(
             f"{file_path.name} (report period)",
             f"Report period ended {period_end.isoformat()}; "
             f"{bridge_gap_days} days before {as_of.isoformat()}.",
+            "bridge",
         )
         draft.append(
             {
@@ -475,7 +488,7 @@ def analyze_soc2(
                 "csf_function": rule["csf"].split(".")[0],
                 "csf_category": rule["csf"],
                 "source": "document",
-                "evidence": [copy.deepcopy(bridge_item)],
+                "evidence": [finding_evidence(bridge_item)],
                 "deal_impact": (
                     f"Report period ended {period_end.isoformat()}, "
                     f"{bridge_gap_days} days before the assessment date; "
@@ -503,7 +516,7 @@ def analyze_soc2(
                 "csf_function": rule["csf"].split(".")[0],
                 "csf_category": rule["csf"],
                 "source": "document",
-                "evidence": [copy.deepcopy(evidence_item)],
+                "evidence": [finding_evidence(evidence_item)],
                 "deal_impact": (
                     f"{org['name']} ({org['services']}) is carved out of "
                     "scope and is critical to production or in-scope data."

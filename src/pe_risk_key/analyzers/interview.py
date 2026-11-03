@@ -182,7 +182,11 @@ def transcribe_interview(
             "sha256": sha256,
             "duration_seconds": cached["duration_seconds"],
             "turns": _apply_speaker_names(cached["segments"], speaker_names),
-            "usage": {"audio_hours": 0.0},
+            "usage": {
+                "audio_hours": cached.get("audio_hours", 0.0),
+                "cached": True,
+                "first_run_cost_usd": cached.get("estimated_cost_usd", 0.0),
+            },
             "estimated_cost_usd": 0.0,
             "cached": True,
             "skipped_empty": cached.get("skipped_empty", 0),
@@ -196,18 +200,22 @@ def transcribe_interview(
     )
     segments, diagnostics = _parse_segments(response)
     duration = _duration_seconds(response)
+    hours = duration / 3600
     cache_path.write_text(
         json.dumps(
             {
                 "duration_seconds": duration,
                 "segments": segments,
+                "audio_hours": round(hours, 6),
+                "estimated_cost_usd": estimate_transcription_cost_usd(
+                    duration
+                ),
                 **diagnostics,
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    hours = duration / 3600
     return {
         "interview_id": interview_id,
         "sha256": sha256,
@@ -234,7 +242,10 @@ def extract_claims(
 
     Returns ``{claims, dropped_unquoted, dropped_not_target, usage,
     estimated_cost_usd}``. ``claims`` holds ``{claim_index, speaker,
-    turn_index, timestamp, text, claim_type}``.
+    turn_index, timestamp, text, claim_type, context_question}`` where
+    context_question is the nearest preceding non-target turn's text
+    (the prompting question), or None. It stays in run artifacts; the
+    digest claim carries only the four schema fields.
     """
     turns = transcript.get("turns", [])
     targets = list(target_speakers)
@@ -278,6 +289,11 @@ def extract_claims(
         found = _locate_claim(text, target_turns)
         if found is not None:
             index, turn, verified = found
+            question = None
+            for back in range(index - 1, -1, -1):
+                if turns[back].get("speaker_name") not in targets:
+                    question = turns[back]["text"]
+                    break
             claims.append(
                 {
                     "claim_index": len(claims),
@@ -286,6 +302,7 @@ def extract_claims(
                     "timestamp": turn["start"],
                     "text": verified,
                     "claim_type": claim_type,
+                    "context_question": question,
                 }
             )
             continue

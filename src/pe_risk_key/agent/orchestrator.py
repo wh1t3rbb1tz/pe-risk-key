@@ -511,10 +511,10 @@ def run_digest(
     after all findings are merged.
 
     Returns ``{digest_id, findings, collector_outputs, adjustments,
-    trace_path, usage}`` and writes ``trace.jsonl``,
+    trace_path, usage, catalog}`` and writes ``trace.jsonl``,
     ``collector_outputs.json``, ``findings.json``,
-    ``evidence_pool.json``, and ``digest.json`` under
-    ``eval/runs/<digest_id>/``.
+    ``evidence_pool.json``, ``claims.json`` (interview runs), and
+    ``digest.json`` under ``eval/runs/<digest_id>/``.
     """
     alias_list = list(aliases or [])
     digest_id = new_digest_id()
@@ -792,6 +792,9 @@ def run_digest(
         if speaker_names:
             interview_entry["speakers"] = list(speaker_names)
         claims = claims_result["claims"]
+        (run_dir / "claims.json").write_text(
+            json.dumps({"claims": claims}, indent=2), encoding="utf-8"
+        )
         if claims:
             crosscheck_result = crosscheck_claims(
                 claims, merged, evidence_pool
@@ -889,4 +892,9 @@ def run_digest(
         "adjustments": adjustments,
         "trace_path": str(run_dir / "trace.jsonl"),
         "usage": usage,
+        "catalog": (
+            crosscheck_result["catalog"]
+            if crosscheck_result is not None
+            else None
+        ),
     }

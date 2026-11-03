@@ -81,6 +81,7 @@ def _claim(index, text, claim_type="control_exists"):
         "timestamp": f"00:0{index}",
         "text": text,
         "claim_type": claim_type,
+        "context_question": "What about this control?",
     }
 
 
@@ -221,3 +222,61 @@ def test_explanation_truncated_and_usage_reported(crosscheck_env):
         "cached_tokens": 0,
     }
     assert result["estimated_cost_usd"] == pytest.approx(0.004)
+
+
+def _pool_item(evidence_id, kind=None, locator="locator", excerpt="Excerpt."):
+    item = {
+        "evidence_id": evidence_id,
+        "source_type": "document",
+        "locator": locator,
+        "excerpt": excerpt,
+    }
+    if kind is not None:
+        item["collector"] = "soc2_analyzer"
+        item["evidence_kind"] = kind
+    return item
+
+
+def test_catalog_counts_and_labels_no_exception(crosscheck_env):
+    findings = [_finding("F-001", "high", ["E-001"])]
+    pool = [
+        _pool_item("E-001", excerpt="Outside-in excerpt."),
+        _pool_item(
+            "E-002",
+            "exception",
+            "Section 4, CC6.1-01",
+            "Exception noted. 4 of 25 reviews were late.",
+        ),
+        _pool_item(
+            "E-003",
+            "no_exception",
+            "Section 4, A1.2-01",
+            "No exceptions noted.",
+        ),
+        _pool_item(
+            "E-004",
+            "no_exception",
+            "Section 4, CC4.1-01",
+            "No exceptions noted. 2 high-severity findings were reported.",
+        ),
+        _pool_item(
+            "E-005",
+            "notable",
+            "Section 5",
+            "Management plans to obtain a bridge letter upon request.",
+        ),
+    ]
+    crosscheck_env.verdicts = []
+    result = crosscheck_claims([_claim(0, "Claim.")], findings, pool)
+    assert result["catalog"] == {
+        "findings": 1,
+        "outside_in_evidence": 1,
+        "soc2_exceptions": 1,
+        "soc2_no_exception": 2,
+        "soc2_notables": 1,
+    }
+    prompt = crosscheck_env.calls[0]["messages"][1]["content"]
+    assert "control tested, no exceptions: No exceptions noted." in prompt
+    assert "Section 4, A1.2-01" in prompt
+    assert "Section 4, CC4.1-01" in prompt
+    assert "bridge letter" in prompt

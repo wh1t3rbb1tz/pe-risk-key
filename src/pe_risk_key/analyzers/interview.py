@@ -4,7 +4,9 @@
 and normalizes the response (per
 https://dev.meta.ai/docs/speech-to-text: ``turns`` carry ``turnId``,
 ``startMs``, ``endMs``, ``transcript``, and ``speaker`` labels such as
-A/B; total length is ``audioDurationMs``). ``extract_claims`` has Muse
+A/B; total length is ``audioDurationMs``). Parsing is tolerant: empty
+turns are skipped, a labelless turn inherits the previous label, and
+consecutive same-speaker turns merge. ``extract_claims`` has Muse
 Wonder pull verbatim security claims from target-side speakers, then
 code verifies each claim against its turn with the SOC 2 quote
 normalizer. Not yet wired into the orchestrator.
@@ -46,32 +48,58 @@ def _format_timestamp(seconds: float) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
-def _parse_segments(response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Raw diarized turns in response order; raises on a malformed turn."""
-    segments = []
+def _parse_segments(
+    response: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Normalize diarized turns; tolerant of real output.
+
+    Skips empty transcripts, lets a labelless turn inherit the previous
+    kept label ("unknown" when first), and merges consecutive turns from
+    the same speaker. Returns (segments, diagnostics).
+    """
+    segments: list[dict[str, Any]] = []
+    skipped_empty = 0
+    speaker_inferred = 0
     turns = response.get("turns", [])
     if not isinstance(turns, list):
         raise ValueError("Transcription response has no turns list.")
     for index, raw in enumerate(turns):
         if not isinstance(raw, dict):
             raise ValueError(f"Turn {index} is not an object: {raw!r}.")
+        text = raw.get("transcript", "")
+        if not isinstance(text, str):
+            raise ValueError(f"Turn {index} has no transcript text: {raw!r}.")
+        if not text.strip():
+            skipped_empty += 1
+            continue
         label = raw.get("speaker")
-        start_ms = raw.get("startMs", 0)
-        text = raw.get("transcript")
         if not isinstance(label, str) or not label.strip():
-            raise ValueError(f"Turn {index} has no speaker label: {raw!r}.")
-        if not isinstance(start_ms, (int, float)):
-            raise ValueError(f"Turn {index} has no startMs: {raw!r}.")
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError(f"Turn {index} has no transcript: {raw!r}.")
-        segments.append(
-            {
-                "speaker_label": label.strip(),
-                "start": _format_timestamp(start_ms / 1000),
-                "text": text.strip(),
-            }
-        )
-    return segments
+            label = segments[-1]["speaker_label"] if segments else "unknown"
+            speaker_inferred += 1
+        else:
+            label = label.strip()
+        start_ms = raw.get("startMs", 0)
+        end_ms = raw.get("endMs", start_ms)
+        if not isinstance(start_ms, (int, float)) or not isinstance(
+            end_ms, (int, float)
+        ):
+            raise ValueError(f"Turn {index} has bad timestamps: {raw!r}.")
+        if segments and segments[-1]["speaker_label"] == label:
+            segments[-1]["text"] += " " + text.strip()
+            segments[-1]["end"] = _format_timestamp(end_ms / 1000)
+        else:
+            segments.append(
+                {
+                    "speaker_label": label,
+                    "start": _format_timestamp(start_ms / 1000),
+                    "end": _format_timestamp(end_ms / 1000),
+                    "text": text.strip(),
+                }
+            )
+    return segments, {
+        "skipped_empty": skipped_empty,
+        "speaker_inferred": speaker_inferred,
+    }
 
 
 def _duration_seconds(response: dict[str, Any]) -> float:
@@ -106,6 +134,7 @@ def _apply_speaker_names(
             "speaker_label": segment["speaker_label"],
             "speaker_name": mapping[segment["speaker_label"]],
             "start": segment["start"],
+            "end": segment.get("end", segment["start"]),
             "text": segment["text"],
         }
         for index, segment in enumerate(segments)
@@ -121,8 +150,11 @@ def transcribe_interview(
     """Transcribe audio with diarization; cache by file sha256.
 
     Returns ``{interview_id, sha256, duration_seconds, turns, usage,
-    estimated_cost_usd, cached}``. ``turns`` holds ``{turn_index,
-    speaker_label, speaker_name, start, text}`` with ``start`` as MM:SS.
+    estimated_cost_usd, cached, skipped_empty, speaker_inferred}``.
+    ``turns`` holds ``{turn_index, speaker_label, speaker_name, start,
+    end, text}`` with ``start``/``end`` as MM:SS. The raw API response
+    is saved to ``<sha256>.raw.json`` beside the cache entry before
+    parsing, for inspection.
     """
     file_path = Path(path)
     sha256 = hashlib.sha256(file_path.read_bytes()).hexdigest()
@@ -137,15 +169,25 @@ def transcribe_interview(
             "usage": {"audio_hours": 0.0},
             "estimated_cost_usd": 0.0,
             "cached": True,
+            "skipped_empty": cached.get("skipped_empty", 0),
+            "speaker_inferred": cached.get("speaker_inferred", 0),
         }
     client = ModelClient(role="transcription", mode=mode)
     response = client.transcribe(file_path)
-    segments = _parse_segments(response)
-    duration = _duration_seconds(response)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (CACHE_DIR / f"{sha256}.raw.json").write_text(
+        json.dumps(response, indent=2), encoding="utf-8"
+    )
+    segments, diagnostics = _parse_segments(response)
+    duration = _duration_seconds(response)
     cache_path.write_text(
         json.dumps(
-            {"duration_seconds": duration, "segments": segments}, indent=2
+            {
+                "duration_seconds": duration,
+                "segments": segments,
+                **diagnostics,
+            },
+            indent=2,
         ),
         encoding="utf-8",
     )
@@ -158,6 +200,7 @@ def transcribe_interview(
         "usage": {"audio_hours": round(hours, 6)},
         "estimated_cost_usd": estimate_transcription_cost_usd(duration),
         "cached": False,
+        **diagnostics,
     }
 
 

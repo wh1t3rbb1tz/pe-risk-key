@@ -225,3 +225,151 @@ def test_claim_timestamp_format_and_claim_type_enum(interview_env):
         "properties"
     ]["claim_type"]["enum"]
     assert claim["claim_type"] in enum
+
+
+# Real turn shape observed from live Voice Transcribe output: empty
+# transcript and no speaker label.
+REAL_EMPTY_TURN = {
+    "turnId": 4,
+    "startMs": 30220,
+    "endMs": 30380,
+    "transcript": "",
+}
+
+
+def _response_with(turns):
+    return {
+        "sessionId": "live",
+        "transcript": "Full transcript.",
+        "audioDurationMs": 65000,
+        "turns": turns,
+    }
+
+
+def test_real_empty_turn_shape_skipped(interview_env):
+    _ScriptedInterviewClient.transcribe_response = _response_with(
+        [
+            {
+                "turnId": 1,
+                "startMs": 0,
+                "endMs": 5000,
+                "transcript": "Hello.",
+                "speaker": "A",
+            },
+            dict(REAL_EMPTY_TURN),
+            {
+                "turnId": 5,
+                "startMs": 31000,
+                "endMs": 35000,
+                "transcript": "Still here.",
+                "speaker": "A",
+            },
+        ]
+    )
+    transcript = transcribe_interview(
+        interview_env, "iv_live", speaker_names=[CTO]
+    )
+    assert transcript["skipped_empty"] == 1
+    assert transcript["speaker_inferred"] == 0
+    # Consecutive A turns merge across the skipped empty turn.
+    (turn,) = transcript["turns"]
+    assert turn["text"] == "Hello. Still here."
+    assert turn["start"] == "00:00"
+    assert turn["end"] == "00:35"
+
+
+def test_missing_label_inherited_from_previous_turn(interview_env):
+    _ScriptedInterviewClient.transcribe_response = _response_with(
+        [
+            {
+                "turnId": 1,
+                "startMs": 0,
+                "endMs": 5000,
+                "transcript": "A question?",
+                "speaker": "B",
+            },
+            {
+                "turnId": 2,
+                "startMs": 5000,
+                "endMs": 9000,
+                "transcript": "Another question, no label.",
+            },
+        ]
+    )
+    transcript = transcribe_interview(
+        interview_env, "iv_live", speaker_names=[LEAD]
+    )
+    assert transcript["skipped_empty"] == 0
+    assert transcript["speaker_inferred"] == 1
+    (turn,) = transcript["turns"]
+    assert turn["speaker_label"] == "B"
+    assert turn["speaker_name"] == LEAD
+    assert turn["text"] == "A question? Another question, no label."
+
+
+def test_first_turn_without_label_is_unknown(interview_env):
+    _ScriptedInterviewClient.transcribe_response = _response_with(
+        [
+            {
+                "turnId": 1,
+                "startMs": 0,
+                "endMs": 5000,
+                "transcript": "No label on the first turn.",
+            },
+        ]
+    )
+    transcript = transcribe_interview(interview_env, "iv_live")
+    assert transcript["speaker_inferred"] == 1
+    (turn,) = transcript["turns"]
+    assert turn["speaker_label"] == "unknown"
+    assert turn["speaker_name"] is None
+
+
+def test_consecutive_same_speaker_turns_merge(interview_env):
+    _ScriptedInterviewClient.transcribe_response = _response_with(
+        [
+            {
+                "turnId": 1,
+                "startMs": 0,
+                "endMs": 5000,
+                "transcript": "First part.",
+                "speaker": "A",
+            },
+            {
+                "turnId": 2,
+                "startMs": 5000,
+                "endMs": 65000,
+                "transcript": "Second part.",
+                "speaker": "A",
+            },
+            {
+                "turnId": 3,
+                "startMs": 65000,
+                "endMs": 70000,
+                "transcript": "Another speaker.",
+                "speaker": "B",
+            },
+        ]
+    )
+    transcript = transcribe_interview(
+        interview_env, "iv_live", speaker_names=[CTO, LEAD]
+    )
+    assert [turn["text"] for turn in transcript["turns"]] == [
+        "First part. Second part.",
+        "Another speaker.",
+    ]
+    assert transcript["turns"][0]["start"] == "00:00"
+    assert transcript["turns"][0]["end"] == "01:05"
+    assert transcript["turns"][1]["start"] == "01:05"
+
+
+def test_raw_response_saved_before_parsing(interview_env):
+    transcript = transcribe_interview(
+        interview_env, "iv_live", speaker_names=[LEAD, CTO]
+    )
+    raw_path = (
+        interview_module.CACHE_DIR / f"{transcript['sha256']}.raw.json"
+    )
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    assert raw["audioDurationMs"] == 65000
+    assert len(raw["turns"]) == 4

@@ -23,6 +23,29 @@ def print_turns(transcript) -> None:
     for turn in turns:
         speaker = turn["speaker_name"] or turn["speaker_label"]
         print(f"  [{turn['start']}] {speaker}: {turn['text']}")
+    labels = {turn["speaker_label"] for turn in turns}
+    print(
+        f"\nparse diagnostics: skipped_empty="
+        f"{transcript.get('skipped_empty', 0)} "
+        f"speaker_inferred={transcript.get('speaker_inferred', 0)} "
+        f"speaker_labels={len(labels)}"
+    )
+
+
+def print_debug(transcript) -> None:
+    raw_path = (
+        ROOT
+        / ".cache"
+        / "transcripts"
+        / f"{transcript['sha256']}.raw.json"
+    )
+    if not raw_path.exists():
+        print("\ndebug: no raw response saved for this transcript")
+        return
+    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+    print(f"\ndebug: top-level keys: {sorted(raw)}")
+    for turn in raw.get("turns", [])[:3]:
+        print(f"  {json.dumps(turn)[:200]}")
 
 
 def print_claims(claims) -> None:
@@ -60,6 +83,7 @@ def main() -> int:
     parser.add_argument("--file", required=True)
     parser.add_argument("--speakers", default="")
     parser.add_argument("--target", required=True, action="append")
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     from pe_risk_key.analyzers import extract_claims, transcribe_interview
@@ -97,6 +121,8 @@ def main() -> int:
         + (" (cached transcript)" if transcript["cached"] else "")
     )
     print_turns(transcript)
+    if args.debug:
+        print_debug(transcript)
     print_claims(result["claims"])
     print_drops(result)
     total = transcript["estimated_cost_usd"] + result["estimated_cost_usd"]

@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -262,6 +263,34 @@ def test_list_digests(client, api_env):
     assert entry["decision"] == "Proceed with conditions"
     assert entry["generated_at"] == "2026-01-01T00:00:00+00:00"
     assert entry["cost"] == 0.5
+
+
+def test_root_serves_dashboard(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "PE Risk Key" in response.text
+    assert 'src="/app.js"' in response.text
+
+
+def test_app_js_api_paths_exist_in_routes():
+    web_app = (
+        Path(api.__file__).resolve().parents[3] / "web" / "app.js"
+    )
+    refs = set(
+        re.sub(r"\$\{[^}]*\}", "{}", match.rstrip("/"))
+        for match in re.findall(
+            r"""["'`](\/api\/[^"'`?+\s]*)""",
+            web_app.read_text(encoding="utf-8"),
+        )
+    )
+    assert refs, "no /api/ references found in app.js"
+    routes = {
+        re.sub(r"\{[^}]*\}", "{}", route.path)
+        for route in api.app.routes
+        if getattr(route, "path", "").startswith("/api")
+    }
+    assert refs <= routes, f"missing routes for {sorted(refs - routes)}"
 
 
 def test_digest_memo_trace_endpoints(client, api_env):

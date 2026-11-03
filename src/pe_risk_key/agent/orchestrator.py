@@ -472,6 +472,7 @@ def _assemble_digest(
     narrative: dict[str, Any] | None = None,
     deal_recommendations: list[dict[str, Any]] | None = None,
     transcript_cached: bool = False,
+    include_narrative_provider: bool = True,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -542,13 +543,14 @@ def _assemble_digest(
                     "model": WONDER_MODEL,
                 }
             )
-    providers.append(
-        {
-            "role": "narrative",
-            "provider": STANDARD_PROVIDER,
-            "model": WONDER_MODEL,
-        }
-    )
+    if include_narrative_provider:
+        providers.append(
+            {
+                "role": "narrative",
+                "provider": STANDARD_PROVIDER,
+                "model": WONDER_MODEL,
+            }
+        )
     digest = {
         "schema_version": "1.0.0",
         "digest_id": digest_id,
@@ -952,6 +954,34 @@ def run_digest(
         overall=scored["overall"],
         function_scores=scored["function_scores"],
     )
+    digest_args: dict[str, Any] = dict(
+        digest_id=digest_id,
+        domain=domain,
+        company_name=company_name,
+        employee_band=employee_band,
+        revenue_band=revenue_band,
+        industry=industry,
+        mode=mode,
+        client=client,
+        collector_outputs=ctx.outputs,
+        findings=merged,
+        scored=scored,
+        trace_path=str(run_dir / "trace.jsonl"),
+        soc2_result=soc2_result,
+        soc2_analysis=soc2_analysis,
+        contradictions=contradictions,
+        interview_entry=interview_entry,
+        ran_crosscheck=crosscheck_result is not None,
+        transcript_cached=bool(
+            interview_data is not None and interview_data[0].get("cached")
+        ),
+    )
+    ctx.trace.event(
+        "digest_preview",
+        digest=_assemble_digest(
+            **digest_args, include_narrative_provider=False
+        ),
+    )
     soc2_summary = None
     if soc2_analysis is not None:
         soc2_summary = {
@@ -962,6 +992,7 @@ def run_digest(
             "bridge_gap_days": soc2_analysis["bridge_gap_days"],
         }
     ctx.trace.event("stage", stage="writing_narrative")
+    narrative_started = time.monotonic()
     narrative_result = generate_narrative(
         {
             "target": {
@@ -995,34 +1026,31 @@ def run_digest(
             "narrative_validation_failed",
             errors=narrative_result["validation_errors"],
         )
+    narrative_duration_ms = round(
+        (time.monotonic() - narrative_started) * 1000, 1
+    )
+    attempts = 2 if narrative_result["regenerated"] else 1
     ctx.trace.event(
         "narrative_complete",
         valid=narrative_result["valid"],
         regenerated=narrative_result["regenerated"],
+        attempts=attempts,
+        duration_ms=narrative_duration_ms,
+        usage=narrative_result["usage"],
+        **(
+            {
+                "first_attempt_errors": narrative_result[
+                    "first_attempt_errors"
+                ]
+            }
+            if attempts == 2
+            else {}
+        ),
     )
     digest = _assemble_digest(
-        digest_id=digest_id,
-        domain=domain,
-        company_name=company_name,
-        employee_band=employee_band,
-        revenue_band=revenue_band,
-        industry=industry,
-        mode=mode,
-        client=client,
-        collector_outputs=ctx.outputs,
-        findings=merged,
-        scored=scored,
-        trace_path=str(run_dir / "trace.jsonl"),
-        soc2_result=soc2_result,
-        soc2_analysis=soc2_analysis,
-        contradictions=contradictions,
-        interview_entry=interview_entry,
-        ran_crosscheck=crosscheck_result is not None,
+        **digest_args,
         narrative=narrative_result["narrative"],
         deal_recommendations=narrative_result["deal_recommendations"],
-        transcript_cached=bool(
-            interview_data is not None and interview_data[0].get("cached")
-        ),
     )
     digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
     (run_dir / "digest.json").write_text(
@@ -1037,6 +1065,7 @@ def run_digest(
         raise ValueError(
             "Assembled digest failed validation: " + "; ".join(digest_errors)
         )
+    ctx.trace.event("digest_final", digest=digest)
     components: dict[str, dict[str, Any]] = {
         "orchestrator": {
             **client.total_usage,

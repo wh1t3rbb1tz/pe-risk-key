@@ -99,6 +99,7 @@ _CANNED_NARRATIVE = {
     "valid": True,
     "validation_errors": [],
     "regenerated": False,
+    "first_attempt_errors": [],
     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cached_tokens": 0},
     "estimated_cost_usd": 0.00014,
 }
@@ -1346,6 +1347,54 @@ def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
     failed = [e for e in trace if e["type"] == "narrative_validation_failed"]
     assert len(failed) == 1
     assert any("exposure" in e or "F-999" in e for e in failed[0]["errors"])
+
+
+def test_preview_final_events_and_narrative_attempts(
+    agent_env, monkeypatch
+):
+    result = _run_narrative_digest(
+        agent_env, monkeypatch, [_narrative_output()]
+    )
+    trace = _read_trace(result)
+    kinds = [event["type"] for event in trace]
+    assert kinds.index("digest_preview") > kinds.index("scoring_complete")
+    assert kinds.index("digest_final") > kinds.index("digest_validated")
+    preview = next(
+        event for event in trace if event["type"] == "digest_preview"
+    )["digest"]
+    assert preview["deal_recommendations"] == []
+    assert "narrative" not in [
+        provider["role"] for provider in preview["mode"]["providers"]
+    ]
+    final = next(
+        event for event in trace if event["type"] == "digest_final"
+    )["digest"]
+    assert final == _read_digest(result)
+    (complete,) = [
+        event for event in trace if event["type"] == "narrative_complete"
+    ]
+    assert complete["attempts"] == 1
+    assert complete["duration_ms"] >= 0
+    assert "first_attempt_errors" not in complete
+
+
+def test_narrative_second_attempt_reports_first_errors(
+    agent_env, monkeypatch
+):
+    bad = _narrative_output()
+    bad["executive_summary"] = "There is a major exposure."
+    result = _run_narrative_digest(
+        agent_env, monkeypatch, [bad, _narrative_output()]
+    )
+    trace = _read_trace(result)
+    (complete,) = [
+        event for event in trace if event["type"] == "narrative_complete"
+    ]
+    assert complete["attempts"] == 2
+    assert any(
+        "exposure" in error
+        for error in complete["first_attempt_errors"]
+    )
 
 
 def test_dedupe_evidence_pool_remaps_refs():

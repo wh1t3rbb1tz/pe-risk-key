@@ -649,8 +649,9 @@ def generate_narrative(
     required_recommendations. The model sees a labeled view (display
     labels instead of enums); numbers validate against that view.
     Returns ``{narrative, deal_recommendations, valid,
-    validation_errors, regenerated, usage, estimated_cost_usd}``. The
-    narrative is sanitized for digest safety even when invalid.
+    validation_errors, regenerated, first_attempt_errors, usage,
+    estimated_cost_usd}``. The narrative is sanitized for digest safety
+    even when invalid.
     """
     findings = payload.get("findings", [])
     contradictions = payload.get("contradictions", [])
@@ -717,6 +718,7 @@ def generate_narrative(
         contradiction_verdicts=contradiction_verdicts,
     )
     regenerated = False
+    first_attempt_errors = list(errors)
     if errors:
         regenerated = True
         messages = [
@@ -794,6 +796,7 @@ def generate_narrative(
         "valid": valid,
         "validation_errors": errors,
         "regenerated": regenerated,
+        "first_attempt_errors": first_attempt_errors,
         "usage": usage,
         "estimated_cost_usd": estimate_token_cost_usd(
             usage, WONDER_USD_PER_MTOK

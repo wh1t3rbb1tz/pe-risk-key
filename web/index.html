@@ -2,15 +2,126 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PE Risk Key</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <h1>PE Risk Key</h1>
-    <p>Dashboard UI lands here.</p>
-    <ul>
-      <li><a href="/api/digests">GET /api/digests</a></li>
-      <li><a href="/api/demo-inputs">GET /api/demo-inputs</a></li>
-      <li><a href="/docs">API docs</a></li>
-    </ul>
+    <header class="topbar">
+      <div class="wordmark">PE Risk Key</div>
+      <div class="topbar-center">
+        <label class="run-label" for="run-picker">Run</label>
+        <select id="run-picker">
+          <option value="">Select a run</option>
+        </select>
+        <button id="replay-btn" type="button" hidden>Replay run</button>
+        <span id="conn-status" class="conn" hidden></span>
+      </div>
+      <button id="new-digest-btn" type="button">New digest</button>
+    </header>
+
+    <aside id="drawer" hidden>
+      <form id="digest-form">
+        <h2>New digest</h2>
+        <div class="form-grid">
+          <label>Domain <input id="f-domain" name="domain" required /></label>
+          <label>Company <input id="f-company" name="company" required /></label>
+          <label>Aliases (comma-separated) <input id="f-aliases" /></label>
+          <label>Employee band <input id="f-employee" required /></label>
+          <label>Revenue band <input id="f-revenue" required /></label>
+          <label>Speaker names (comma-separated) <input id="f-speakers" /></label>
+          <label>Target speaker <input id="f-target" /></label>
+          <label>As of <input id="f-asof" type="date" /></label>
+          <label class="check">
+            <input id="f-demo" type="checkbox" /> Demo mode (collectors from fixtures)
+          </label>
+        </div>
+        <div class="uploads">
+          <label>SOC 2 file <input id="f-soc2" type="file" /></label>
+          <label>Interview audio <input id="f-interview" type="file" /></label>
+          <p id="demo-hints" class="hints" hidden></p>
+        </div>
+        <p id="form-error" class="error" hidden></p>
+        <div class="form-actions">
+          <button id="load-demo-btn" type="button">Load demo target</button>
+          <span class="spacer"></span>
+          <button id="drawer-cancel" type="button">Cancel</button>
+          <button id="run-btn" type="submit">Run</button>
+        </div>
+      </form>
+    </aside>
+
+    <section id="rail" hidden>
+      <ol id="stages"></ol>
+      <div class="rail-right">
+        <span id="cost-ticker" class="mono">$0.00 · 0 tokens</span>
+        <span id="rail-error" class="error" hidden></span>
+      </div>
+    </section>
+
+    <main id="content" hidden>
+      <div class="columns">
+        <section id="trace-col" aria-label="Agent trace">
+          <h2>Agent trace</h2>
+          <p id="plan" class="plan" hidden></p>
+          <h3>Collectors</h3>
+          <div id="tool-groups"></div>
+          <h3>Lanes</h3>
+          <div id="lanes"></div>
+          <button id="adjustments-toggle" type="button" hidden></button>
+          <ul id="adjustments" hidden></ul>
+        </section>
+        <section id="main-col" aria-label="Digest">
+          <div id="decision"></div>
+          <section id="summary-panel" class="panel" hidden>
+            <h2>Executive summary</h2>
+            <div id="summary-body"></div>
+          </section>
+          <section id="claims-panel" class="panel" hidden>
+            <h2>Management claims vs. evidence</h2>
+            <div id="claims-note" class="muted" hidden></div>
+            <div id="claims"></div>
+          </section>
+          <section id="risks-panel" class="panel" hidden>
+            <h2>Key risks</h2>
+            <div id="risks"></div>
+          </section>
+          <section id="functions-panel" class="panel" hidden>
+            <h2>Function scores</h2>
+            <div id="functions"></div>
+          </section>
+          <section id="soc2-panel" class="panel" hidden>
+            <h2>SOC 2</h2>
+            <div id="soc2"></div>
+          </section>
+          <section id="plan-panel" class="panel" hidden>
+            <h2>100-day plan</h2>
+            <div id="plan100"></div>
+          </section>
+          <section id="recs-panel" class="panel" hidden>
+            <h2>Deal recommendations</h2>
+            <div id="recs"></div>
+          </section>
+          <section id="questions-panel" class="panel" hidden>
+            <h2>Questions for management</h2>
+            <ol id="questions"></ol>
+          </section>
+          <section id="limitations-panel" class="panel" hidden>
+            <h2>Limitations</h2>
+            <ul id="limitations"></ul>
+          </section>
+          <footer id="provenance" class="panel" hidden></footer>
+          <div id="export-wrap" hidden>
+            <a id="export-memo" href="#">Export IC memo</a>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <div id="empty-state">
+      <p>Select a run or start a new digest.</p>
+    </div>
+
+    <script src="/app.js"></script>
   </body>
 </html>

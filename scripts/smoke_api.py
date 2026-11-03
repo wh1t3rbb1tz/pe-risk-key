@@ -54,7 +54,13 @@ def _detail(event: dict[str, Any]) -> str:
         overall = event.get("overall") or {}
         return f"rating={overall.get('rating', '?')}"
     if event_type == "narrative_complete":
-        return f"valid={event.get('valid', '?')}"
+        return (
+            f"valid={event.get('valid', '?')} "
+            f"attempts={event.get('attempts', '?')}"
+        )
+    if event_type in ("digest_preview", "digest_final"):
+        overall = (event.get("digest") or {}).get("overall", {})
+        return f"rating={overall.get('rating', '?')}"
     if event_type in ("document_analysis_start", "document_analysis_end"):
         return str(event.get("doc_id", ""))
     if event_type in ("transcription_start", "transcription_end"):
@@ -185,10 +191,10 @@ def main() -> int:
             digest_response = client.get(f"/api/digests/{digest_id}")
             digest_response.raise_for_status()
             digest = digest_response.json()
-            from pe_risk_key.api.app import DECISION_LABELS
+            from pe_risk_key.engine.narrative import DEAL_SIGNAL_LABELS
 
             overall = digest.get("overall", {})
-            decision = DECISION_LABELS.get(
+            decision = DEAL_SIGNAL_LABELS.get(
                 overall.get("deal_signal", ""), overall.get("deal_signal")
             )
             usage = (run_end or {}).get("usage") or {}

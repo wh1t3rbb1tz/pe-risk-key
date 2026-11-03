@@ -68,7 +68,11 @@ def print_recall(findings: list[dict], domain: str) -> None:
         for entry in expected.get("expected_findings", [])
         if entry.get("source") == "outside_in"
     }
-    got = {f.get("rule_id") for f in findings if f.get("rule_id")}
+    got = {
+        f.get("rule_id")
+        for f in findings
+        if f.get("rule_id") and f.get("source") != "document"
+    }
     must = set(expected.get("must_not_find", []))
     matched = want & got
     print(
@@ -80,6 +84,21 @@ def print_recall(findings: list[dict], domain: str) -> None:
     print(f"missing expected rules: {sorted(want - got) or '-'}")
     print(f"unexpected rules: {sorted(got - want) or '-'}")
     print(f"must_not_find hits: {sorted(got & must) or '-'}")
+
+
+def print_soc2_summary(digest: dict) -> None:
+    analysis = digest.get("soc2_analysis")
+    if analysis is None:
+        return
+    soc2_findings = sum(
+        1 for f in digest["findings"] if f.get("source") == "document"
+    )
+    print(
+        f"\nsoc2: opinion={analysis['opinion']} "
+        f"exceptions={len(analysis['exceptions'])} "
+        f"findings={soc2_findings} "
+        f"bridge_gap={analysis['bridge_gap_days']}d"
+    )
 
 
 def print_usage(usage: dict) -> None:
@@ -123,6 +142,8 @@ def main() -> int:
     parser.add_argument("--aliases", default="")
     parser.add_argument("--industry", default=None)
     parser.add_argument("--demo", action="store_true")
+    parser.add_argument("--soc2", default=None, help="Path to a SOC 2 report")
+    parser.add_argument("--as-of", default=None, help="YYYY-MM-DD")
     args = parser.parse_args()
     if args.demo:
         os.environ["DEMO_MODE"] = "1"
@@ -137,6 +158,8 @@ def main() -> int:
         args.revenue_band,
         aliases=aliases,
         industry=args.industry,
+        soc2_path=args.soc2,
+        as_of=args.as_of,
     )
     print(f"=== run_digest: {args.domain} ({result['digest_id']}) ===")
     trace = [
@@ -150,7 +173,9 @@ def main() -> int:
     print_recall(result["findings"], args.domain)
     print_usage(result["usage"])
     digest_path = Path(result["trace_path"]).parent / "digest.json"
-    print_digest_summary(json.loads(digest_path.read_text(encoding="utf-8")))
+    digest = json.loads(digest_path.read_text(encoding="utf-8"))
+    print_soc2_summary(digest)
+    print_digest_summary(digest)
     print(f"saved: {Path(result['trace_path']).parent.relative_to(ROOT)}/")
     return 0
 

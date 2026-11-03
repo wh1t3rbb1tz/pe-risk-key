@@ -418,7 +418,7 @@ def analyze_soc2(
         draft.append(
             {
                 "finding_id": finding_id,
-                "title": rule["title"],
+                "title": f"{rule['title']} ({item['control_id']})",
                 "severity": rule["severity"],
                 "confidence": "high",
                 "csf_function": rule["csf"].split(".")[0],

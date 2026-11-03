@@ -9,10 +9,13 @@ Everything lands in ``eval/runs/<digest_id>/``: ``trace.jsonl``,
 
 from __future__ import annotations
 
+import copy
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+import re
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,7 @@ import yaml
 
 import pe_risk_key.collectors as collectors
 from pe_risk_key.agent.context import RunContext, new_digest_id
+from pe_risk_key.analyzers.soc2 import SOC2Result, analyze_soc2
 from pe_risk_key.agent.prompts import (
     coverage_followup,
     system_prompt,
@@ -28,7 +32,13 @@ from pe_risk_key.agent.prompts import (
 )
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.engine.scoring import score_digest
-from pe_risk_key.providers import SPARK_MODEL, STANDARD_PROVIDER, Mode, ModelClient
+from pe_risk_key.providers import (
+    SPARK_MODEL,
+    STANDARD_PROVIDER,
+    WONDER_MODEL,
+    Mode,
+    ModelClient,
+)
 from pe_risk_key.validate import validate_digest
 from pe_risk_key.schemas import (
     strict_subschema,
@@ -201,6 +211,98 @@ def _parse_submission(call: dict[str, Any]) -> list[Any]:
     return findings if isinstance(findings, list) else []
 
 
+_FINDING_ID_RE = re.compile(r"^F-(\d+)$")
+_EVIDENCE_ID_RE = re.compile(r"^E-(\d+)$")
+
+
+def _id_base(ids: list[str | None], pattern: re.Pattern, count: int) -> int:
+    numbered = [
+        int(match.group(1))
+        for raw in ids
+        if (match := pattern.match(raw or ""))
+    ]
+    return max([count, *numbered])
+
+
+def _renumber_soc2(
+    outside_findings: list[dict], soc2: SOC2Result
+) -> tuple[list[dict], list[dict], dict[str, Any]]:
+    """Renumber SOC 2 findings/evidence after the outside-in IDs.
+
+    Returns (findings, evidence_pool, soc2_analysis) with new IDs and
+    consistent cross-references; inputs are not mutated.
+    """
+    finding_base = _id_base(
+        [f.get("finding_id") for f in outside_findings],
+        _FINDING_ID_RE,
+        len(outside_findings),
+    )
+    outside_evidence = [
+        e.get("evidence_id")
+        for f in outside_findings
+        for e in f.get("evidence", [])
+    ]
+    evidence_base = _id_base(
+        outside_evidence, _EVIDENCE_ID_RE, len(outside_evidence)
+    )
+    finding_map = {
+        f["finding_id"]: f"F-{finding_base + index + 1:03d}"
+        for index, f in enumerate(soc2.findings)
+    }
+    evidence_map = {
+        e["evidence_id"]: f"E-{evidence_base + index + 1:03d}"
+        for index, e in enumerate(soc2.evidence_pool)
+    }
+    findings = [
+        {
+            **finding,
+            "finding_id": finding_map[finding["finding_id"]],
+            "evidence": [
+                {
+                    **item,
+                    "evidence_id": evidence_map.get(
+                        item["evidence_id"], item["evidence_id"]
+                    ),
+                }
+                for item in finding["evidence"]
+            ],
+        }
+        for finding in soc2.findings
+    ]
+    pool = [
+        {**item, "evidence_id": evidence_map[item["evidence_id"]]}
+        for item in soc2.evidence_pool
+    ]
+    analysis = copy.deepcopy(soc2.soc2_analysis)
+    for exception in analysis.get("exceptions", []):
+        if exception.get("finding_id") in finding_map:
+            exception["finding_id"] = finding_map[exception["finding_id"]]
+    return findings, pool, analysis
+
+
+def _run_soc2_analysis(
+    ctx: RunContext, soc2_path: str | Path, doc_id: str, as_of: date | str
+) -> SOC2Result:
+    ctx.trace.event("document_analysis_start", doc_id=doc_id)
+    started = time.monotonic()
+    result = analyze_soc2(soc2_path, doc_id, as_of)
+    duration_ms = round((time.monotonic() - started) * 1000, 1)
+    ctx.trace.event(
+        "document_analysis_end",
+        doc_id=doc_id,
+        duration_ms=duration_ms,
+        tokens={
+            key: result.usage.get(key, 0)
+            for key in ("prompt_tokens", "completion_tokens", "cached_tokens")
+        },
+        finding_count=len(result.findings),
+    )
+    return result
+
+
+_REPORT_TYPE_TO_DOC = {"type1": "soc2_type1", "type2": "soc2_type2"}
+
+
 def _assemble_digest(
     *,
     digest_id: str,
@@ -215,6 +317,8 @@ def _assemble_digest(
     findings: list[dict],
     scored: dict[str, Any],
     trace_path: str,
+    soc2_result: SOC2Result | None = None,
+    soc2_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -240,7 +344,26 @@ def _assemble_digest(
                 "model": SPARK_MODEL,
             }
         )
-    return {
+    documents: list[dict[str, Any]] = []
+    if soc2_result is not None:
+        providers.append(
+            {
+                "role": "document_analysis",
+                "provider": STANDARD_PROVIDER,
+                "model": WONDER_MODEL,
+            }
+        )
+        documents.append(
+            {
+                "doc_id": soc2_result.doc_id,
+                "type": _REPORT_TYPE_TO_DOC.get(
+                    soc2_result.soc2_analysis["report_type"], "other"
+                ),
+                "filename": soc2_result.filename,
+                "sha256": soc2_result.sha256,
+            }
+        )
+    digest = {
         "schema_version": "1.0.0",
         "digest_id": digest_id,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -252,7 +375,7 @@ def _assemble_digest(
         },
         "inputs": {
             "domain_scan": True,
-            "documents": [],
+            "documents": documents,
             "interviews": [],
         },
         "overall": scored["overall"],
@@ -265,6 +388,9 @@ def _assemble_digest(
         "limitations": scored["limitations"],
         "trace_ref": trace_path,
     }
+    if soc2_analysis is not None:
+        digest["soc2_analysis"] = soc2_analysis
+    return digest
 
 
 def run_digest(
@@ -275,12 +401,20 @@ def run_digest(
     aliases: list[str] | None = None,
     industry: str | None = None,
     mode: Mode = "standard",
+    soc2_path: str | Path | None = None,
+    as_of: date | str | None = None,
 ) -> dict[str, Any]:
     """Run the orchestrator end to end; returns the digest result.
 
+    When ``soc2_path`` is given, the SOC 2 analyzer runs concurrently
+    with the model loop's first turn and its findings merge into the
+    digest after the outside-in findings are finalized. ``as_of``
+    defaults to today.
+
     Returns ``{digest_id, findings, collector_outputs, adjustments,
     trace_path, usage}`` and writes ``trace.jsonl``,
-    ``collector_outputs.json``, and ``findings.json`` under
+    ``collector_outputs.json``, ``findings.json``,
+    ``evidence_pool.json``, and ``digest.json`` under
     ``eval/runs/<digest_id>/``.
     """
     alias_list = list(aliases or [])
@@ -327,6 +461,17 @@ def run_digest(
     plan_traced = False
     group = 0
     pool = ThreadPoolExecutor(max_workers=8)
+    soc2_future: Future[SOC2Result] | None = None
+    soc2_doc_id: str | None = None
+    if soc2_path is not None:
+        soc2_doc_id = "doc_" + digest_id[3:]
+        soc2_future = pool.submit(
+            _run_soc2_analysis,
+            ctx,
+            soc2_path,
+            soc2_doc_id,
+            as_of or date.today(),
+        )
     try:
         for turn in range(MAX_TURNS):
             ctx.trace.event("model_turn_start", turn=turn)
@@ -437,6 +582,19 @@ def run_digest(
     finally:
         pool.shutdown(wait=True)
 
+    soc2_result: SOC2Result | None = None
+    if soc2_future is not None:
+        try:
+            soc2_result = soc2_future.result()
+        except Exception as exc:
+            ctx.trace.event(
+                "document_analysis_end",
+                doc_id=soc2_doc_id,
+                status="error",
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
     findings_in = submitted if submitted is not None else []
     constrained, adjustments = apply_rule_constraints(
         findings_in, scoring, employee_band
@@ -478,14 +636,31 @@ def run_digest(
         json.dumps({"findings": findings}, indent=2), encoding="utf-8"
     )
 
+    soc2_analysis: dict[str, Any] | None = None
+    evidence_pool = [
+        {**item}
+        for finding in findings
+        for item in finding.get("evidence", [])
+    ]
+    merged = list(findings)
+    if soc2_result is not None:
+        soc2_findings, soc2_pool, soc2_analysis = _renumber_soc2(
+            findings, soc2_result
+        )
+        merged.extend(soc2_findings)
+        evidence_pool.extend(soc2_pool)
+    (run_dir / "evidence_pool.json").write_text(
+        json.dumps({"evidence": evidence_pool}, indent=2), encoding="utf-8"
+    )
+
     scored = score_digest(
-        findings,
+        merged,
         [],
         scoring,
         domain_scan=True,
-        has_soc2=False,
+        has_soc2=soc2_analysis is not None,
         has_interview=False,
-        soc2_opinion=None,
+        soc2_opinion=soc2_analysis["opinion"] if soc2_analysis else None,
         revenue_band=revenue_band,
     )
     ctx.trace.event(
@@ -503,9 +678,11 @@ def run_digest(
         mode=mode,
         client=client,
         collector_outputs=ctx.outputs,
-        findings=findings,
+        findings=merged,
         scored=scored,
         trace_path=str(run_dir / "trace.jsonl"),
+        soc2_result=soc2_result,
+        soc2_analysis=soc2_analysis,
     )
     digest_errors = validate_digest(digest)
     (run_dir / "digest.json").write_text(
@@ -527,7 +704,7 @@ def run_digest(
     ctx.trace.event("run_end", usage=usage)
     return {
         "digest_id": digest_id,
-        "findings": findings,
+        "findings": merged,
         "collector_outputs": ctx.outputs,
         "adjustments": adjustments,
         "trace_path": str(run_dir / "trace.jsonl"),

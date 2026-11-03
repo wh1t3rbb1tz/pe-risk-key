@@ -1,9 +1,12 @@
 """Tests for pe_risk_key.agent (mocked model + collectors). No network."""
 
+import copy
+import hashlib
 import json
 import re
 import threading
 import time
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +16,7 @@ import yaml
 
 import pe_risk_key.agent.context as agent_context
 import pe_risk_key.agent.orchestrator as orchestrator
+import pe_risk_key.analyzers.soc2 as soc2_module
 from pe_risk_key.agent import run_digest
 from pe_risk_key.agent.prompts import system_prompt
 from pe_risk_key.collectors import incidents, kev, net, web_posture
@@ -659,3 +663,221 @@ def test_trace_file_complete_and_ordered(agent_env, monkeypatch):
     ]
     assert len(adjustments) == 1
     assert adjustments[0]["reason"] == "unknown_rule"
+
+
+_SOC2_REPORT_TEXT = """Example Audit LLP examined Acme controls for the period.
+Report period: January 1, 2026 to March 31, 2026.
+Opinion: We found the controls suitably designed and operating effectively.
+CC6.1-01 Logical access reviews. Result: 4 of 25 access reviews were late.
+"""
+
+
+class _ScriptedSoc2Client:
+    extraction = {}
+    calls: list = []
+
+    def __init__(self, role, mode="standard", **kwargs):
+        assert role == "document_analysis", role
+        self.total_usage = {
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "cached_tokens": 0,
+        }
+
+    def chat_json(
+        self, messages, *, schema, schema_name, reasoning_effort=None
+    ):
+        type(self).calls.append({"schema_name": schema_name})
+        return copy.deepcopy(type(self).extraction)
+
+
+def _soc2_extraction():
+    return {
+        "report_type": "type2",
+        "period_start": "2026-01-01",
+        "period_end": "2026-03-31",
+        "auditor": "Example Audit LLP",
+        "trust_services_categories": ["security"],
+        "opinion": "unqualified",
+        "opinion_quote": (
+            "We found the controls suitably designed and "
+            "operating effectively."
+        ),
+        "exceptions": [
+            {
+                "control_id": "CC6.1-01",
+                "control_ref": "CC6.1-01",
+                "description": "Quarterly access reviews were late.",
+                "auditor_test": "Inspected access review records.",
+                "deviations": 4,
+                "sample_size": 25,
+                "management_response": "Reviews are now automated.",
+                "locator": "Section IV, CC6.1-01",
+                "quote": "Result: 4 of 25 access reviews were late.",
+                "deal_impact": "Access hygiene lagged during the period.",
+            }
+        ],
+        "subservice_orgs": [],
+        "cuecs": [],
+        "notable_observations": [],
+        "bridge_letter_provided": False,
+    }
+
+
+def _dmarc_finding():
+    return _finding(
+        rule_id="EMAIL-DMARC-NONE",
+        finding_id="F-002",
+        title="DMARC not enforced",
+        severity="high",
+        csf_category="PR.DS",
+        csf_function="PR",
+        evidence=[
+            {
+                "evidence_id": "E-002",
+                "source_type": "outside_in",
+                "collection_method": "dns_query",
+                "locator": f"_dmarc.{DOMAIN} TXT",
+                "excerpt": "No DMARC record published.",
+            }
+        ],
+    )
+
+
+def _run_soc2_digest(agent_env, monkeypatch, tmp_path, **kwargs):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    _ScriptedSoc2Client.extraction = _soc2_extraction()
+    _ScriptedSoc2Client.calls = []
+    monkeypatch.setattr(soc2_module, "ModelClient", _ScriptedSoc2Client)
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {
+            "content": "Submitting.",
+            "tool_calls": [_submit(_finding(), _dmarc_finding())],
+        },
+    ]
+    report = tmp_path / "acme_soc2.md"
+    report.write_text(_SOC2_REPORT_TEXT, encoding="utf-8")
+    params = {"soc2_path": report, "as_of": "2026-10-30"}
+    params.update(kwargs)
+    return run_digest(DOMAIN, "Acme", "201-1000", "50M-250M", **params)
+
+
+def _read_digest(result):
+    return json.loads(
+        (Path(result["trace_path"]).parent / "digest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def test_soc2_findings_renumbered_without_collisions(
+    agent_env, monkeypatch, tmp_path
+):
+    result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
+    digest = _read_digest(result)
+    findings = digest["findings"]
+    assert [f["finding_id"] for f in findings] == [
+        "F-001",
+        "F-002",
+        "F-003",
+        "F-004",
+    ]
+    assert findings[2]["rule_id"] == "SOC2-EXCEPTION-ACCESS"
+    assert findings[2]["title"].endswith("(CC6.1)")
+    assert findings[3]["rule_id"] == "SOC2-BRIDGE-GAP"
+    evidence_ids = [
+        e["evidence_id"] for f in findings for e in f["evidence"]
+    ]
+    assert sorted(evidence_ids) == ["E-001", "E-002", "E-003", "E-004"]
+    assert digest["soc2_analysis"]["exceptions"][0]["finding_id"] == "F-003"
+
+
+def test_soc2_evidence_pool_merged(agent_env, monkeypatch, tmp_path):
+    result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
+    run_dir = Path(result["trace_path"]).parent
+    pool = json.loads(
+        (run_dir / "evidence_pool.json").read_text(encoding="utf-8")
+    )
+    by_id = {item["evidence_id"]: item for item in pool["evidence"]}
+    assert sorted(by_id) == ["E-001", "E-002", "E-003", "E-004"]
+    assert by_id["E-001"]["locator"] == f"{DOMAIN} DS"
+    soc2_items = [
+        item
+        for item in pool["evidence"]
+        if item.get("collector") == "soc2_analyzer"
+    ]
+    assert {item["evidence_id"] for item in soc2_items} == {"E-003", "E-004"}
+    assert all(
+        item["collection_method"] == "document_upload"
+        for item in soc2_items
+    )
+
+
+def test_soc2_digest_validates_and_confidence_medium(
+    agent_env, monkeypatch, tmp_path
+):
+    result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
+    digest = _read_digest(result)
+    assert validate_digest(digest) == []
+    assert digest["soc2_analysis"]["opinion"] == "unqualified"
+    assert digest["soc2_analysis"]["bridge_gap_days"] == 213
+    assert digest["inputs"]["documents"] == [
+        {
+            "doc_id": "doc_" + result["digest_id"][3:],
+            "type": "soc2_type2",
+            "filename": "acme_soc2.md",
+            "sha256": hashlib.sha256(
+                _SOC2_REPORT_TEXT.encode("utf-8")
+            ).hexdigest(),
+        }
+    ]
+    roles = [p["role"] for p in digest["mode"]["providers"]]
+    assert roles == ["orchestrator", "public_records", "document_analysis"]
+    assert digest["overall"]["confidence"] == "medium"
+    assert "No SOC 2 report provided" not in digest["limitations"]
+    assert "No management interview provided" in digest["limitations"]
+
+
+def test_soc2_trace_events(agent_env, monkeypatch, tmp_path):
+    result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
+    trace = _read_trace(result)
+    starts = [e for e in trace if e["type"] == "document_analysis_start"]
+    ends = [e for e in trace if e["type"] == "document_analysis_end"]
+    assert len(starts) == 1
+    assert len(ends) == 1
+    assert trace.index(starts[0]) < trace.index(ends[0])
+    end = ends[0]
+    assert end["duration_ms"] >= 0
+    assert end["tokens"] == {
+        "prompt_tokens": 1000,
+        "completion_tokens": 200,
+        "cached_tokens": 0,
+    }
+    assert end["finding_count"] == 2
+
+
+def test_soc2_as_of_defaults_to_today(agent_env, monkeypatch, tmp_path):
+    result = _run_soc2_digest(
+        agent_env, monkeypatch, tmp_path, as_of=None
+    )
+    digest = _read_digest(result)
+    expected_gap = (date.today() - date(2026, 3, 31)).days
+    assert digest["soc2_analysis"]["bridge_gap_days"] == expected_gap

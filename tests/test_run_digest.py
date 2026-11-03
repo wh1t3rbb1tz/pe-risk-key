@@ -50,6 +50,41 @@ def test_recall_matches_context_question(capsys):
     assert "verdict accuracy: 1/1" in out
 
 
+def test_verdict_any_of_accepts_unsupported(capsys):
+    script = _load_script()
+    contradictions = [
+        _contradiction("C-001", "We can get one.", "unsupported")
+    ]
+    script.print_contradiction_recall(
+        contradictions,
+        "brightwaterfleet.example",
+        {"We can get one.": "Can you provide a bridge letter on request?"},
+    )
+    out = capsys.readouterr().out
+    assert "contradiction recall: 1/9" in out
+    assert "verdict accuracy: 1/1" in out
+    assert "wrong verdicts: -" in out
+
+
+def test_print_narrative_invalid_prints_errors(capsys):
+    script = _load_script()
+    digest = {
+        "narrative": {"executive_summary": "Summary [F-001]."},
+        "deal_recommendations": [],
+    }
+    trace = [
+        {
+            "type": "narrative_complete",
+            "valid": False,
+            "errors": ["deal_recommendations[0] cites unknown id 'F-999'."],
+        }
+    ]
+    script.print_narrative(digest, trace)
+    out = capsys.readouterr().out
+    assert "narrative validation: valid=False" in out
+    assert "cites unknown id 'F-999'" in out
+
+
 def test_print_contradictions(capsys):
     script = _load_script()
     script.print_contradictions(

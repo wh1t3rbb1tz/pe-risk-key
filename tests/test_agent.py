@@ -1536,15 +1536,17 @@ def test_narrative_repaired_traced_without_regeneration(
 ):
     output = _narrative_output()
     output["deal_recommendations"][0]["text"] = (
-        "Require the fix in Days 31-60 [F-001], consistent with the "
-        "proceed decision."
+        "Require the fix in Days 31-60 [F-001], consistent with Proceed "
+        "with conditions."
     )
     result = _run_narrative_digest(agent_env, monkeypatch, [output])
     trace = _read_trace(result)
     (repaired,) = [
         event for event in trace if event["type"] == "narrative_repaired"
     ]
-    assert any("trailing deal-signal" in fix for fix in repaired["repairs"])
+    assert any(
+        "removed restated decision" in fix for fix in repaired["repairs"]
+    )
     (complete,) = [
         event for event in trace if event["type"] == "narrative_complete"
     ]

@@ -8,10 +8,14 @@ run manually, not from the test suite.
 import argparse
 import json
 import os
-import re
 from pathlib import Path
 
 import yaml
+
+from pe_risk_key.engine.eval_metrics import (
+    match_contradictions,
+    score_findings,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,27 +69,23 @@ def print_recall(findings: list[dict], domain: str) -> None:
         print(f"\nrecall: no expected file for {domain}, skipped")
         return
     expected = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
-    want = {
-        entry["rule_id"]
-        for entry in expected.get("expected_findings", [])
-        if entry.get("source") == "outside_in"
-    }
-    got = {
-        f.get("rule_id")
-        for f in findings
-        if f.get("rule_id") and f.get("source") != "document"
-    }
-    must = set(expected.get("must_not_find", []))
-    matched = want & got
-    print(
-        f"\nrecall: {len(matched)}/{len(want)} = "
-        f"{len(matched) / len(want) * 100:.1f}%"
-        if want
-        else "\nrecall: no outside-in expectations"
+    wanted = expected.get("expected_findings", [])
+    if not wanted:
+        print("\nrecall: no finding expectations")
+        return
+    result = score_findings(
+        findings, wanted, expected.get("must_not_find", [])
     )
-    print(f"missing expected rules: {sorted(want - got) or '-'}")
-    print(f"unexpected rules: {sorted(got - want) or '-'}")
-    print(f"must_not_find hits: {sorted(got & must) or '-'}")
+    print(
+        f"\nrecall: {result['matched']}/{result['total_expected']} = "
+        f"{result['recall'] * 100:.1f}%"
+    )
+    print(f"missing expected rules: {result['missing'] or '-'}")
+    print(f"unexpected rules: {result['unexpected'] or '-'}")
+    print(f"must_not_find hits: {result['must_not_find_hits'] or '-'}")
+    print(
+        f"severity exact: {result['severity_exact']}/{result['matched']}"
+    )
 
 
 def print_contradictions(
@@ -133,45 +133,21 @@ def print_contradiction_recall(
     if not wanted:
         print("\ncontradictions: no contradiction expectations")
         return
-    questions = context_questions or {}
-    matched = 0
-    correct = 0
-    misses: list[str] = []
-    wrong: list[str] = []
-    for entry in wanted:
-        pattern = entry.get("match_keywords", "")
-
-        def _matches(contradiction: dict) -> bool:
-            if not pattern:
-                return False
-            text = contradiction["claim"]["text"]
-            haystack = text + "\n" + questions.get(text, "")
-            return bool(re.search(pattern, haystack, re.IGNORECASE))
-
-        hit = next((c for c in contradictions if _matches(c)), None)
-        label = f"claim {entry.get('claim_ref')}: {entry.get('topic')}"
-        if hit is None:
-            misses.append(label)
-            continue
-        matched += 1
-        if hit["verdict"] == entry.get("verdict"):
-            correct += 1
-        else:
-            wrong.append(
-                f"{label} (want {entry.get('verdict')}, "
-                f"got {hit['verdict']})"
-            )
-    print(
-        f"\ncontradiction recall: {matched}/{len(wanted)} = "
-        f"{matched / len(wanted) * 100:.1f}%"
+    result = match_contradictions(
+        contradictions, wanted, context_questions
     )
-    print(f"missing claims: {misses or '-'}")
+    matched = result["matched"]
+    print(
+        f"\ncontradiction recall: {matched}/{result['total_expected']} = "
+        f"{result['recall'] * 100:.1f}%"
+    )
+    print(f"missing claims: {result['misses'] or '-'}")
     if matched:
         print(
-            f"verdict accuracy: {correct}/{matched} = "
-            f"{correct / matched * 100:.1f}%"
+            f"verdict accuracy: {result['correct']}/{matched} = "
+            f"{result['accuracy'] * 100:.1f}%"
         )
-        print(f"wrong verdicts: {wrong or '-'}")
+        print(f"wrong verdicts: {result['wrong'] or '-'}")
     else:
         print("verdict accuracy: n/a (no matched claims)")
 
@@ -200,6 +176,12 @@ def print_narrative(digest: dict, trace: list[dict]) -> None:
     if failed:
         status += f", {len(failed[0].get('errors', []))} errors kept"
     print(f"\nnarrative validation: {status}")
+    if complete and complete[0].get("valid") is False:
+        errors = complete[0].get("errors", []) or []
+        if not errors and failed:
+            errors = failed[0].get("errors", []) or []
+        for error in errors:
+            print(f"  - {error}")
 
 
 def print_soc2_summary(digest: dict) -> None:

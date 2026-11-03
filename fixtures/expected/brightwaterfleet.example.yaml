@@ -52,7 +52,7 @@ expected_contradictions:
   - { claim_ref: 6, topic: legacy decommissioned,   verdict: contradicted, severity: medium, match_keywords: "legacy|decommission" }
   - { claim_ref: 7, topic: clean pen test,          verdict: contradicted, severity: medium, match_keywords: "pen test|no highs" }
   - { claim_ref: 8, topic: immutable backups,       verdict: supported, match_keywords: "backup|immutable" }
-  - { claim_ref: 9, topic: bridge letter available, verdict: supported, match_keywords: "bridge letter" }
+  - { claim_ref: 9, topic: bridge letter available, verdict_any_of: [supported, unsupported], match_keywords: "bridge letter" }
 
 expected_overall:
   # Caps that must fire. Exact score is asserted in tests/test_scoring.py

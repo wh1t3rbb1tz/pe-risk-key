@@ -26,7 +26,7 @@ SYSTEM_PROMPT = """You write the investment-committee narrative for a cyber-risk
 1. executive_summary (max 1200 characters) has four labeled paragraphs: "Bottom line:" the decision in one sentence, then the rating and why, with the caps in plain words; "Key risks:" the top 3-4; "Management credibility:" the contradiction pattern, with counts taken from the input; "Next steps:" what to do next.
 2. Every sentence that asserts a risk must cite at least one finding or contradiction id in square brackets, e.g. [F-001] [C-002].
 3. Never state numbers (costs, counts, dates, scores) that aren't in the input; use the scored values exactly as given, in the input's money style.
-4. Deal recommendations: write exactly one recommendation per required type, following its guidance. Recommendations must reference the remediation windows and the deal signal. Do not restate the deal signal as a shared opening clause, and never start a recommendation with its own type name.
+4. Deal recommendations: write exactly one recommendation per required type, following its guidance. Recommendations must reference the remediation windows. The overall decision is shown separately and must not be restated in any recommendation; give each recommendation a distinct opening, and never start one with its own type name.
 5. key_questions_for_management: 5 to 8 questions, each tied to specific findings or contradictions via bracket citations. Use neutral diligence phrasing ("Provide...", "Reconcile...", "Confirm..."), never "Why did...".
 6. Write plain IC prose: no enum strings, cap ids, control codes, or evidence locators. Cite [F-xxx]/[C-xxx] instead."""
 
@@ -111,11 +111,22 @@ _CAP_ID_RE = re.compile(r"\bCAP-[A-Z0-9-]+\b")
 _SNAKE_RE = re.compile(r"\b[A-Za-z0-9]+_[A-Za-z0-9_]+\b")
 _SPECULATION_RE = re.compile(r"\b(if present|may contain)\b", re.IGNORECASE)
 _SOC_TWO_RE = re.compile(r"soc 2", re.IGNORECASE)
-_SIGNAL_LEADIN_RE = re.compile(
-    r"\b(consistent with|in line with|supporting|aligned with|"
-    r"reflecting|in keeping with)\b",
+_DECISION_CUT_RE = re.compile(r",|;|\b(?:and|or)\b", re.IGNORECASE)
+_DECISION_AFTER_CONJ_RE = re.compile(
+    r"\s*(?:and|or)\b\s*(.*)$", re.IGNORECASE | re.DOTALL
+)
+_DECISION_CITATION_ONLY_RE = re.compile(
+    r"^(?:\s*\[[FC]-\d{3}\]\s*)*[.?!]?\s*$"
+)
+_DECISION_BEFORE_RE = re.compile(
+    r"(?:^|[,\-–—:;(/]|\b(?:and|or)\b)\s*$", re.IGNORECASE
+)
+_DECISION_DANGLING_PREP_RE = re.compile(
+    r"\s+(?:about|after|against|as|at|before|between|by|during|for|"
+    r"from|in|into|of|on|through|to|under|with|within|without)$",
     re.IGNORECASE,
 )
+_DECISION_AFTER_CITE_RE = re.compile(r"^(?:\s*\[[FC]-\d{3}\])*\s*")
 _REPAIR_TOKEN_LABELS = {
     **DEAL_SIGNAL_LABELS,
     **WINDOW_LABELS,
@@ -321,9 +332,6 @@ def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "score": _decimal_text(overall.get("score")),
             "rating": overall.get("rating"),
             "confidence": overall.get("confidence"),
-            "decision": DEAL_SIGNAL_LABELS.get(
-                overall.get("deal_signal"), overall.get("deal_signal")
-            ),
             "caps": [
                 CAP_LABELS.get(cap_id, cap_id)
                 for cap_id in overall.get("rating_caps_applied", [])
@@ -732,6 +740,97 @@ def validate_narrative(
     return errors
 
 
+def _decision_phrases(deal_label: str) -> list[str]:
+    """The decision label plus its phrasing (text after any colon)."""
+    label = (deal_label or "").strip()
+    if not label:
+        return []
+    phrases = [label]
+    if ":" in label:
+        tail = label.split(":", 1)[1].strip()
+        if tail and tail != label:
+            phrases.append(tail)
+    return phrases
+
+
+def _bare_decision_mention(before: str, after: str) -> bool:
+    """Guard for single-word labels: only a standalone restatement.
+
+    "Proceed" is also a verb ("Proceed on the basis that..."), so it
+    counts only at a clause start and only when no word follows it.
+    """
+    if _DECISION_BEFORE_RE.search(before) is None:
+        return False
+    rest = _DECISION_AFTER_CITE_RE.sub("", after)
+    return rest == "" or not (rest[0].isalnum() or rest[0] == "_")
+
+
+def _cut_restatement(before: str, after: str) -> str:
+    """Remove one decision-phrase occurrence, keeping the sentence whole.
+
+    A phrase joined to following content by and/or is a list item, so
+    only the phrase and the conjunction go; otherwise the cut runs back
+    to the last clause boundary.
+    """
+    conj = _DECISION_AFTER_CONJ_RE.match(after)
+    if conj and _DECISION_CITATION_ONLY_RE.match(conj.group(1)) is None:
+        return before.rstrip() + " " + conj.group(1).lstrip()
+    bounds = list(_DECISION_CUT_RE.finditer(before))
+    head = (
+        before[: bounds[-1].start()].rstrip().rstrip(",;")
+        if bounds
+        else before.rstrip()
+    )
+    head = _DECISION_DANGLING_PREP_RE.sub("", head)
+    tail = after.strip()
+    if not tail:
+        return head
+    if not head:
+        return tail
+    return head + " " + tail
+
+
+def _tidy_text(text: str) -> str:
+    """Collapse whitespace and fix punctuation left by removals."""
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\s+([.,;:!?)\]])", r"\1", text)
+    text = re.sub(r"\(\s*\)", "", text)
+    text = re.sub(r",\s*,", ",", text)
+    text = re.sub(r"\s{2,}", " ", text.strip().rstrip(",;:")).strip()
+    if text and not text.endswith((".", "?", "!")):
+        text += "."
+    return text
+
+
+def _strip_decision_restatements(
+    text: str, deal_label: str
+) -> tuple[str, list[str]]:
+    """Remove restated decision labels/phrasing from one rec text."""
+    repairs: list[str] = []
+    for phrase in _decision_phrases(deal_label):
+        single_word = " " not in phrase
+        pattern = re.compile(
+            r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", re.IGNORECASE
+        )
+        pos = 0
+        while True:
+            match = pattern.search(text, pos)
+            if match is None:
+                break
+            before, after = text[: match.start()], text[match.end() :]
+            if single_word and not _bare_decision_mention(before, after):
+                pos = match.end()
+                continue
+            text = _cut_restatement(before, after)
+            repairs.append(
+                f"removed restated decision {match.group(0)!r}"
+            )
+            pos = 0
+    if repairs:
+        text = _tidy_text(text)
+    return text, repairs
+
+
 def repair_narrative(
     output: Any,
     *,
@@ -742,20 +841,15 @@ def repair_narrative(
     """Deterministic fixes for mechanical narrative violations.
 
     Rounds over-precise scores, replaces enum/snake_case tokens via the
-    label maps, strips trailing clauses that restate the deal signal,
-    trims the summary at a sentence boundary, and drops duplicate
-    citations beyond two per id (short evidence only). Returns the
-    fixed output plus a human-readable list of repairs applied.
+    label maps, removes restated decision labels or phrasing from deal
+    recommendations, trims the summary at a sentence boundary, and
+    drops duplicate citations beyond two per id (short evidence only).
+    Returns the fixed output plus the repairs applied.
     """
     fixed = copy.deepcopy(output)
     repairs: list[str] = []
     if not isinstance(fixed, dict):
         return fixed, repairs
-    keywords = {
-        word
-        for word in re.findall(r"[a-z]+", (deal_label or "").lower())
-        if len(word) >= 4
-    }
 
     def detokenize(text: Any) -> Any:
         if not isinstance(text, str):
@@ -849,22 +943,11 @@ def repair_narrative(
             if not isinstance(rec, dict):
                 continue
             text = detokenize(rec.get("text"))
-            if isinstance(text, str) and keywords:
-                head, sep, tail = text.rstrip().rpartition(",")
-                lowered = tail.lower()
-                if (
-                    sep
-                    and _SIGNAL_LEADIN_RE.search(tail)
-                    and any(word in lowered for word in keywords)
-                ):
-                    head = head.rstrip()
-                    if not head.endswith((".", "?", "!")):
-                        head += "."
-                    repairs.append(
-                        "stripped trailing deal-signal clause "
-                        f"{tail.strip()!r}"
-                    )
-                    text = head
+            if isinstance(text, str):
+                text, removed = _strip_decision_restatements(
+                    text, deal_label
+                )
+                repairs.extend(removed)
             rec["text"] = text
     return fixed, repairs
 
@@ -938,7 +1021,18 @@ def generate_narrative(
     has_interview = payload.get("has_interview", True)
     has_soc2 = payload.get("soc2_summary", True) is not None
     short = len(finding_ids) <= SHORT_EVIDENCE_FINDINGS
+    deal_label = DEAL_SIGNAL_LABELS.get(
+        (payload.get("overall") or {}).get("deal_signal"), ""
+    )
     extra_rules = [
+        (
+            f"The overall decision is: {deal_label}. State it once in "
+            "the Bottom line paragraph. It is shown separately in the "
+            "memo and must not be restated in deal recommendations."
+            if deal_label
+            else "State the overall decision once in the Bottom line "
+            "paragraph; it must not be restated in deal recommendations."
+        ),
         "Do not speculate about conditions not in the evidence "
         '("if present", "may contain"); state what is known and what '
         "to verify.",
@@ -975,9 +1069,6 @@ def generate_narrative(
         reasoning_effort="medium",
     )
     add_trigger_basis(output)
-    deal_label = DEAL_SIGNAL_LABELS.get(
-        (payload.get("overall") or {}).get("deal_signal"), ""
-    )
     max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
 
     def validate_fixed(candidate: Any) -> tuple[Any, list[str], list[str]]:

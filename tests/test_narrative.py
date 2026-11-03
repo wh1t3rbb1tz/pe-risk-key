@@ -498,9 +498,14 @@ def test_repair_replaces_tokens_with_labels():
     assert "in Protect." in fixed["executive_summary"]
 
 
-def test_repair_strips_trailing_signal_clause():
+def test_repair_removes_restated_decision_anywhere():
+    output = _good_output()
+    output["deal_recommendations"][0]["text"] = (
+        "Require the fix in Days 31-60 [F-001], consistent with full "
+        "cyber diligence required before signing."
+    )
     fixed, repairs = repair_narrative(
-        _repairable_output(),
+        output,
         max_chars=600,
         short=True,
         deal_label="Escalate: full cyber diligence required before signing",
@@ -508,7 +513,7 @@ def test_repair_strips_trailing_signal_clause():
     assert fixed["deal_recommendations"][0]["text"] == (
         "Require the fix in Days 31-60 [F-001]."
     )
-    assert any("trailing deal-signal" in repair for repair in repairs)
+    assert any("removed restated decision" in repair for repair in repairs)
     kept, kept_repairs = repair_narrative(
         _good_output(), max_chars=600, short=True, deal_label="Proceed"
     )
@@ -517,6 +522,150 @@ def test_repair_strips_trailing_signal_clause():
         == "Require DMARC enforcement before close."
     )
     assert kept_repairs == []
+
+
+def test_repair_removes_full_label_and_conditions():
+    output = _good_output()
+    output["deal_recommendations"] = [
+        {
+            "type": "closing_condition",
+            "text": (
+                "Require the fix, consistent with Escalate: full cyber "
+                "diligence required before signing."
+            ),
+            "basis_ids": ["F-001"],
+        },
+        {
+            "type": "price_adjustment",
+            "text": (
+                "No adjustment is warranted under Proceed with conditions."
+            ),
+            "basis_ids": ["F-001"],
+        },
+        {
+            "type": "cyber_insurance",
+            "text": "Proceed on the basis that coverage holds [F-001].",
+            "basis_ids": ["F-001"],
+        },
+    ]
+    fixed, _ = repair_narrative(
+        output,
+        max_chars=600,
+        short=True,
+        deal_label="Escalate: full cyber diligence required before signing",
+    )
+    assert fixed["deal_recommendations"][0]["text"] == "Require the fix."
+    kept, _ = repair_narrative(
+        output,
+        max_chars=600,
+        short=True,
+        deal_label="Proceed with conditions",
+    )
+    assert (
+        kept["deal_recommendations"][1]["text"]
+        == "No adjustment is warranted."
+    )
+    verb, verb_repairs = repair_narrative(
+        output, max_chars=600, short=True, deal_label="Proceed"
+    )
+    assert verb["deal_recommendations"][2]["text"] == (
+        "Proceed on the basis that coverage holds [F-001]."
+    )
+    assert verb_repairs == []
+
+
+def test_repair_strips_run_dg_b808md3ua63f_restatements():
+    texts = [
+        (
+            "closing_condition",
+            "Make signing conditional on verification and a compromise "
+            "assessment for the internet-facing ExampleGate SSL-VPN "
+            "exposure during Days 0–30, with a bring-down of security "
+            "representations at signing.",
+        ),
+        (
+            "full_diligence_scope",
+            "Commission a scope covering the known-exploited-product "
+            "exposure and independent validation of management "
+            "representations, sequenced with the Days 0–30 work, to "
+            "satisfy full cyber diligence required before signing "
+            "[F-008].",
+        ),
+        (
+            "specific_indemnity",
+            "Seek a specific indemnity for pre-closing incident losses "
+            "tied to the disclosed incident, informed by the Days 31–60 "
+            "incident review and full cyber diligence required before "
+            "signing [F-009].",
+        ),
+        (
+            "rw_insurance_note",
+            "Proceed on the basis that the known incident is likely "
+            "excluded from representations and warranties coverage, "
+            "resolve any gap before close after the Days 31–60 review, "
+            "and reflect full cyber diligence required before signing "
+            "[F-009].",
+        ),
+        (
+            "cyber_insurance",
+            "Confirm insurability and likely underwriting requirements "
+            "before close, using remediation of email spoofing and "
+            "privileged-access controls in Days 31–60, within full cyber "
+            "diligence required before signing [F-001] [F-010] [F-011].",
+        ),
+        (
+            "post_close_covenant",
+            "Impose a post-close covenant to complete the remaining "
+            "remediation across Days 31–60 and Days 61–100, sequenced "
+            "after full cyber diligence required before signing [F-010] "
+            "[F-011] [F-012] [F-013] [F-001] [F-002] [F-004] [F-006] "
+            "[F-009] [F-014].",
+        ),
+        (
+            "price_adjustment",
+            "Do not seek a price adjustment on cyber grounds alone "
+            "because total remediation of $142K–$643K is immaterial "
+            "relative to the 50M-250M revenue band, but preserve full "
+            "cyber diligence required before signing and the windows "
+            "from Days 0–30 through After day 100 [F-008] [F-009].",
+        ),
+    ]
+    output = {
+        "executive_summary": (
+            "Bottom line: ok [F-008]. Key risks: none. Management "
+            "credibility: ok. Next steps: none."
+        ),
+        "key_questions_for_management": [],
+        "deal_recommendations": [
+            {"type": rec_type, "text": text, "basis_ids": ["F-008"]}
+            for rec_type, text in texts
+        ],
+    }
+    fixed, repairs = repair_narrative(
+        output,
+        max_chars=1200,
+        short=False,
+        deal_label="Escalate: full cyber diligence required before signing",
+    )
+    cleaned = {
+        rec["type"]: rec["text"]
+        for rec in fixed["deal_recommendations"]
+    }
+    assert len(repairs) == 6
+    for text in cleaned.values():
+        assert "full cyber diligence required before signing" not in text
+    assert cleaned["closing_condition"] == texts[0][1]
+    assert cleaned["full_diligence_scope"] == (
+        "Commission a scope covering the known-exploited-product "
+        "exposure and independent validation of management "
+        "representations, sequenced with the Days 0–30 work [F-008]."
+    )
+    assert cleaned["price_adjustment"] == (
+        "Do not seek a price adjustment on cyber grounds alone because "
+        "total remediation of $142K–$643K is immaterial relative to the "
+        "50M-250M revenue band, but preserve the windows from Days 0–30 "
+        "through After day 100 [F-008] [F-009]."
+    )
 
 
 def test_repair_trims_and_dedupes():
@@ -727,6 +876,18 @@ def test_scores_one_decimal_in_input(narrative_env):
     labeled = json.loads(sent)
     assert labeled["overall"]["score"] == "72.5"
     assert labeled["function_scores"][0]["score"] == "60.0"
+
+
+def test_decision_in_prompt_not_in_labeled_input(narrative_env):
+    narrative_env.outputs = [_good_output()]
+    generate_narrative(_payload())
+    messages = narrative_env.calls[0]["messages"]
+    labeled = json.loads(messages[1]["content"])
+    assert "decision" not in labeled["overall"]
+    system = messages[0]["content"]
+    assert "The overall decision is: Proceed with conditions." in system
+    assert "must not be restated in deal recommendations" in system
+    assert "must not be restated in any recommendation" in system
 
 
 def test_two_decimal_score_flagged():

@@ -1182,6 +1182,7 @@ def run_digest(
     ctx.trace.event(
         "narrative_complete",
         valid=narrative_result["valid"],
+        errors=narrative_result["validation_errors"],
         regenerated=narrative_result["regenerated"],
         attempts=attempts,
         duration_ms=narrative_duration_ms,

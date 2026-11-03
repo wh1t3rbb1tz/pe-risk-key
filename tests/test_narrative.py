@@ -1,6 +1,7 @@
 """Tests for pe_risk_key.engine.narrative (mocked model). No network."""
 
 import copy
+import json
 
 import pytest
 
@@ -311,18 +312,16 @@ def test_trigger_table_yields_brightwater_types():
     from pe_risk_key.engine.narrative import required_recommendation_types
 
     findings = [
-        {"rule_id": rule_id}
-        for rule_id in (
-            "EMAIL-DMARC-NONE",
-            "KEV-POTENTIAL",
-            "PUB-INCIDENT-RECENT",
-        )
+        {"finding_id": "F-001", "rule_id": "EMAIL-DMARC-NONE"},
+        {"finding_id": "F-008", "rule_id": "KEV-POTENTIAL"},
+        {"finding_id": "F-009", "rule_id": "PUB-INCIDENT-RECENT"},
+        {"finding_id": "F-010", "rule_id": "SOC2-EXCEPTION-ACCESS"},
     ]
     required = required_recommendation_types(
         findings=findings,
         caps_applied=["CAP-CRIT", "CAP-INCIDENT", "CAP-CONTRADICTION"],
         remediation_plan={
-            "items": [{"window": "days_31_60"}],
+            "items": [{"window": "days_31_60", "finding_ids": ["F-001"]}],
             "total_cost_low_usd": 142000,
             "total_cost_high_usd": 643000,
         },
@@ -340,8 +339,17 @@ def test_trigger_table_yields_brightwater_types():
     }
     assert any(
         "no adjustment is warranted" in guidance
-        for guidance in required["price_adjustment"]
+        for guidance in required["price_adjustment"]["guidance"]
     )
+    assert required["cyber_insurance"]["trigger_findings"] == [
+        "F-001",
+        "F-010",
+    ]
+    assert required["closing_condition"]["trigger_findings"] == ["F-008"]
+    assert required["post_close_covenant"]["trigger_findings"] == [
+        "F-010",
+        "F-001",
+    ]
 
 
 def test_plan_sorted_by_window_with_total():
@@ -392,3 +400,103 @@ def test_supported_claims_appear_last():
         < section.index("C-003")
         < section.index("C-001")
     )
+
+
+def _validate_ids():
+    return {
+        "finding_ids": {"F-001"},
+        "contradiction_ids": {"C-001"},
+        "input_numbers": {"72.5", "001"},
+    }
+
+
+def test_shared_leading_clause_flagged():
+    output = _good_output()
+    output["deal_recommendations"] = [
+        {
+            "type": "closing_condition",
+            "text": "Proceed with conditions and require the buyer to verify controls.",
+            "basis_ids": ["F-001"],
+        },
+        {
+            "type": "price_adjustment",
+            "text": "Proceed with conditions and require the buyer to confirm coverage.",
+            "basis_ids": ["F-001"],
+        },
+    ]
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("leading clause" in error for error in errors)
+
+
+def test_type_label_prefix_flagged():
+    output = _good_output()
+    output["deal_recommendations"] = [
+        {
+            "type": "closing_condition",
+            "text": "Closing condition: require the fix before signing.",
+            "basis_ids": ["F-001"],
+        }
+    ]
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("own type label" in error for error in errors)
+
+
+def test_supported_basis_flagged():
+    output = _good_output()
+    output["deal_recommendations"] = [
+        {
+            "type": "closing_condition",
+            "text": "Require the fix before signing.",
+            "basis_ids": ["C-002"],
+        }
+    ]
+    errors = validate_narrative(
+        output,
+        finding_ids={"F-001"},
+        contradiction_ids={"C-001", "C-002"},
+        input_numbers={"72.5", "001"},
+        contradiction_verdicts={"C-002": "supported"},
+    )
+    assert any("supported contradiction C-002" in error for error in errors)
+
+
+def test_trigger_ids_added_before_validation(narrative_env):
+    payload = _payload()
+    payload["required_recommendations"] = {
+        "closing_condition": {
+            "guidance": ["verification before signing"],
+            "trigger_findings": ["F-001"],
+        }
+    }
+    output = _good_output()
+    output["deal_recommendations"] = [
+        {
+            "type": "closing_condition",
+            "text": "Require the fix before signing.",
+            "basis_ids": ["C-001"],
+        }
+    ]
+    narrative_env.outputs = [output]
+    result = generate_narrative(payload)
+    assert result["valid"] is True
+    (rec,) = result["deal_recommendations"]
+    assert rec["basis_ids"] == ["C-001", "F-001"]
+
+
+def test_scores_one_decimal_in_input(narrative_env):
+    narrative_env.outputs = [_good_output()]
+    generate_narrative(_payload())
+    sent = narrative_env.calls[0]["messages"][1]["content"]
+    labeled = json.loads(sent)
+    assert labeled["overall"]["score"] == "72.5"
+    assert labeled["function_scores"][0]["score"] == "60.0"
+
+
+def test_two_decimal_score_flagged():
+    output = _good_output()
+    output["executive_summary"] = (
+        "Bottom line: rating C [F-001]. Key risks: score 72.50. "
+        "Management credibility: ok [C-001]. Next steps: none."
+    )
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("2+ decimals" in error for error in errors)

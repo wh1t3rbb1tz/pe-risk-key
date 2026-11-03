@@ -206,6 +206,10 @@
               }
             }
           }
+        },
+        "served_from_fixture": {
+          "type": "boolean",
+          "description": "Collectors served from fixtures (DEMO_MODE); no live collection."
         }
       }
     },

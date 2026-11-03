@@ -862,9 +862,12 @@ def test_fixture_controls_tested_no_exception_in_pool(soc2_env):
         for item in result.evidence_pool
         if item.get("collector") == "soc2_analyzer"
     }
-    assert "No exceptions noted." in excerpts
     assert (
-        "No exceptions noted. 2 high-severity findings were reported "
+        "CC6.6-01 (Description of CC6.6-01.): No exceptions noted."
+    ) in excerpts
+    assert (
+        "CC4.1-01 (Description of CC4.1-01.): No exceptions noted. "
+        "2 high-severity findings were reported "
         "in the test; remediation status was outside the scope of "
         "this control."
     ) in excerpts

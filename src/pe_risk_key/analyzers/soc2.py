@@ -425,7 +425,12 @@ def analyze_soc2(
     ]
     for tested in controls_tested:
         if tested.get("result") == "no_exception":
-            add_evidence(tested["locator"], tested["quote"], "no_exception")
+            add_evidence(
+                tested["locator"],
+                f"{tested['control_ref']} ({tested['description']}): "
+                f"{tested['quote']}",
+                "no_exception",
+            )
     carve_outs = [org for org in orgs if org.get("method") == "carve_out"]
     carve_evidence = [
         add_evidence(

@@ -24,7 +24,7 @@ SYSTEM_PROMPT = """You write the investment-committee narrative for a cyber-risk
 1. executive_summary (max 1200 characters) has four labeled paragraphs: "Bottom line:" the decision in one sentence, then the rating and why, with the caps in plain words; "Key risks:" the top 3-4; "Management credibility:" the contradiction pattern, with counts taken from the input; "Next steps:" what to do next.
 2. Every sentence that asserts a risk must cite at least one finding or contradiction id in square brackets, e.g. [F-001] [C-002].
 3. Never state numbers (costs, counts, dates, scores) that aren't in the input; use the scored values exactly as given, in the input's money style.
-4. Deal recommendations: write exactly one recommendation per required type, following its guidance. Recommendations must reference the remediation windows and the deal signal.
+4. Deal recommendations: write exactly one recommendation per required type, following its guidance. Recommendations must reference the remediation windows and the deal signal. Do not restate the deal signal as a shared opening clause, and never start a recommendation with its own type name.
 5. key_questions_for_management: 5 to 8 questions, each tied to specific findings or contradictions via bracket citations. Use neutral diligence phrasing ("Provide...", "Reconcile...", "Confirm..."), never "Why did...".
 6. Write plain IC prose: no enum strings, cap ids, control codes, or evidence locators. Cite [F-xxx]/[C-xxx] instead."""
 
@@ -98,6 +98,7 @@ DEAL_TYPE_LABELS = {
 
 _CITE_RE = re.compile(r"\[(F|C)-(\d{3})\]")
 _NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_OVER_PRECISE_RE = re.compile(r"\d+\.\d{2,}")
 _CAP_ID_RE = re.compile(r"\bCAP-[A-Z0-9-]+\b")
 _SNAKE_RE = re.compile(r"\b[A-Za-z0-9]+_[A-Za-z0-9_]+\b")
 _FUNCTION_CODE_RE = re.compile(
@@ -178,6 +179,25 @@ def _cited_ids(text: str) -> list[str]:
     return [f"{kind}-{num}" for kind, num in _CITE_RE.findall(text)]
 
 
+def _shared_prefix_words(first: str, second: str) -> int:
+    """Leading word run shared by two texts (lowercased, unpunctuated)."""
+    table = str.maketrans("", "", ".,;:!?()\"'")
+
+    def words(text: str) -> list[str]:
+        return [
+            word.translate(table).lower()
+            for word in text.split()
+            if word.translate(table)
+        ]
+
+    count = 0
+    for left, right in zip(words(first), words(second)):
+        if left != right:
+            break
+        count += 1
+    return count
+
+
 def _format_money(value: Any) -> str:
     """Triage cost as $142K (nearest thousand) or $800."""
     try:
@@ -200,6 +220,14 @@ def _label_text(text: Any) -> Any:
     return _FUNCTION_WORD_RE.sub(
         lambda match: FUNCTION_NAMES[match.group(0)], text
     )
+
+
+def _decimal_text(value: Any) -> Any:
+    """Scores as one-decimal strings; anything else passes through."""
+    try:
+        return f"{float(value):.1f}"
+    except (TypeError, ValueError):
+        return value
 
 
 def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -263,7 +291,7 @@ def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "target": payload.get("target", {}),
         "overall": {
-            "score": overall.get("score"),
+            "score": _decimal_text(overall.get("score")),
             "rating": overall.get("rating"),
             "confidence": overall.get("confidence"),
             "decision": DEAL_SIGNAL_LABELS.get(
@@ -279,7 +307,7 @@ def _label_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 "function": FUNCTION_NAMES.get(
                     entry.get("function"), entry.get("function")
                 ),
-                "score": entry.get("score"),
+                "score": _decimal_text(entry.get("score")),
                 "assessed": entry.get("assessed"),
                 "finding_count": entry.get("finding_count"),
             }
@@ -335,27 +363,54 @@ def required_recommendation_types(
     remediation_plan: dict[str, Any],
     revenue_midpoint_usd: float,
     soc2_analysis: dict[str, Any] | None,
-) -> dict[str, list[str]]:
-    """Deterministic deal-recommendation triggers: type -> guidance."""
-    required: dict[str, list[str]] = {}
+) -> dict[str, dict[str, list[str]]]:
+    """Deterministic deal-recommendation triggers.
 
-    def add(rec_type: str, guidance: str) -> None:
-        guidance_list = required.setdefault(rec_type, [])
-        if guidance not in guidance_list:
-            guidance_list.append(guidance)
+    Returns type -> {"guidance": [...], "trigger_findings": [...]} where
+    trigger_findings are the finding ids whose rules fired the trigger.
+    Cap- and totals-driven triggers carry no finding ids.
+    """
+    required: dict[str, dict[str, list[str]]] = {}
 
-    rules = {finding.get("rule_id") for finding in findings}
-    if "KEV-POTENTIAL" in rules:
+    def add(
+        rec_type: str, guidance: str, trigger_ids: list[str] | None = None
+    ) -> None:
+        entry = required.setdefault(
+            rec_type, {"guidance": [], "trigger_findings": []}
+        )
+        if guidance not in entry["guidance"]:
+            entry["guidance"].append(guidance)
+        for finding_id in trigger_ids or []:
+            if finding_id not in entry["trigger_findings"]:
+                entry["trigger_findings"].append(finding_id)
+
+    def with_rule(*rule_ids: str) -> list[str]:
+        return [
+            finding["finding_id"]
+            for finding in findings
+            if finding.get("rule_id") in rule_ids
+            and isinstance(finding.get("finding_id"), str)
+        ]
+
+    kev_ids = with_rule("KEV-POTENTIAL")
+    if kev_ids:
         add(
             "closing_condition",
             "verification and compromise assessment before signing",
+            kev_ids,
         )
-        add("full_diligence_scope", "scope review of KEV-listed exposure")
-    if "PUB-INCIDENT-RECENT" in rules:
-        add("specific_indemnity", "pre-closing incident losses")
+        add(
+            "full_diligence_scope",
+            "scope review of KEV-listed exposure",
+            kev_ids,
+        )
+    incident_ids = with_rule("PUB-INCIDENT-RECENT")
+    if incident_ids:
+        add("specific_indemnity", "pre-closing incident losses", incident_ids)
         add(
             "rw_insurance_note",
             "known incident likely excluded from R&W coverage",
+            incident_ids,
         )
     if "CAP-CONTRADICTION" in caps_applied:
         add(
@@ -366,24 +421,37 @@ def required_recommendation_types(
     soc2_exceptions = (
         soc2_analysis.get("exceptions", []) if soc2_analysis else []
     )
-    if (
-        "EMAIL-DMARC-NONE" in rules
-        or "SOC2-EXCEPTION-ACCESS" in rules
-        or any(
-            exception.get("control_id") == "CC6.1"
-            for exception in soc2_exceptions
-        )
-    ):
+    access_ids = with_rule("EMAIL-DMARC-NONE", "SOC2-EXCEPTION-ACCESS")
+    has_cc61 = any(
+        exception.get("control_id") == "CC6.1" for exception in soc2_exceptions
+    )
+    if access_ids or has_cc61:
         add(
             "cyber_insurance",
             "likely underwriting requirement; confirm insurability "
             "before close",
+            access_ids,
         )
-    windows = {
-        item.get("window") for item in remediation_plan.get("items", [])
-    }
-    if soc2_exceptions or windows & {"days_31_60", "days_61_100"}:
-        add("post_close_covenant", "complete remediation after close")
+    plan_items = remediation_plan.get("items", [])
+    late_ids = [
+        finding_id
+        for item in plan_items
+        if item.get("window") in ("days_31_60", "days_61_100")
+        for finding_id in (item.get("finding_ids") or [])
+        if isinstance(finding_id, str)
+    ]
+    soc2_ids = [
+        finding["finding_id"]
+        for finding in findings
+        if str(finding.get("rule_id", "")).startswith("SOC2-EXCEPTION")
+        and isinstance(finding.get("finding_id"), str)
+    ]
+    if soc2_exceptions or late_ids:
+        add(
+            "post_close_covenant",
+            "complete remediation after close",
+            soc2_ids + [i for i in late_ids if i not in soc2_ids],
+        )
     total_high = remediation_plan.get("total_cost_high_usd", 0) or 0
     if total_high > 0.01 * revenue_midpoint_usd:
         add(
@@ -421,6 +489,8 @@ def validate_narrative(
     contradiction_ids: set[str],
     input_numbers: set[str],
     required_types: set[str] | None = None,
+    trigger_findings: dict[str, list[str]] | None = None,
+    contradiction_verdicts: dict[str, str] | None = None,
 ) -> list[str]:
     """Human-readable validation errors; empty means valid."""
     errors: list[str] = []
@@ -486,6 +556,8 @@ def validate_narrative(
             )
     valid_types = set(deal_recommendation_type_enum())
     seen_types: set[str] = set()
+    triggers = trigger_findings or {}
+    verdicts = contradiction_verdicts or {}
     for index, rec in enumerate(recs):
         label = f"deal_recommendations[{index}]"
         if not isinstance(rec, dict):
@@ -495,17 +567,54 @@ def validate_narrative(
             errors.append(f"{label} has unknown type {rec.get('type')!r}.")
         else:
             seen_types.add(rec["type"])
-        check_text(label, rec.get("text"), require_citation=False)
+        text = rec.get("text")
+        check_text(label, text, require_citation=False)
+        if isinstance(text, str) and isinstance(rec.get("type"), str):
+            type_label = DEAL_TYPE_LABELS.get(rec["type"], "")
+            if type_label and text.lstrip().lower().startswith(
+                type_label.lower()
+            ):
+                errors.append(
+                    f"{label} starts with its own type label; lead with "
+                    "the substance instead."
+                )
         basis = rec.get("basis_ids")
         if not isinstance(basis, list) or not basis:
             errors.append(f"{label} has no basis_ids.")
         else:
             for ref in basis:
                 if ref in finding_ids or ref in contradiction_ids:
+                    if verdicts.get(ref) == "supported":
+                        errors.append(
+                            f"{label} cites supported contradiction {ref}; "
+                            "basis must contradict or be silent."
+                        )
                     continue
                 errors.append(f"{label} cites unknown id {ref!r}.")
+            needed = triggers.get(rec.get("type"), [])
+            if needed and not (set(basis) & set(needed)):
+                errors.append(
+                    f"{label} basis must include trigger finding(s) "
+                    f"{', '.join(needed)}."
+                )
     for rec_type in sorted((required_types or set()) - seen_types):
         errors.append(f"missing required {rec_type} recommendation.")
+    rec_texts = [
+        (index, rec.get("text"))
+        for index, rec in enumerate(recs)
+        if isinstance(rec, dict) and isinstance(rec.get("text"), str)
+    ]
+    for left in range(len(rec_texts)):
+        for right in range(left + 1, len(rec_texts)):
+            shared = _shared_prefix_words(
+                rec_texts[left][1], rec_texts[right][1]
+            )
+            if shared >= 8:
+                errors.append(
+                    f"deal_recommendations[{rec_texts[left][0]}] and "
+                    f"[{rec_texts[right][0]}] share a {shared}-word "
+                    "leading clause; restate the deal signal once at most."
+                )
     cited: set[str] = set()
     texts: list[Any] = [summary, *questions]
     texts.extend(
@@ -521,6 +630,11 @@ def validate_narrative(
     for token in sorted(_number_tokens(summary) - input_numbers):
         errors.append(
             f"executive_summary states number {token} not in the input."
+        )
+    for token in sorted(set(_OVER_PRECISE_RE.findall(summary))):
+        errors.append(
+            f"executive_summary states number {token} with 2+ decimals; "
+            "use one-decimal scores."
         )
     return errors
 
@@ -550,7 +664,35 @@ def generate_narrative(
         for item in contradictions
         if isinstance(item.get("contradiction_id"), str)
     }
-    required_types = set(payload.get("required_recommendations", {}) or {})
+    required_map = payload.get("required_recommendations", {}) or {}
+    if not isinstance(required_map, dict):
+        required_map = {}
+    required_types = set(required_map)
+    trigger_findings = {
+        rec_type: entry.get("trigger_findings", [])
+        for rec_type, entry in required_map.items()
+        if isinstance(entry, dict)
+    }
+    contradiction_verdicts = {
+        item.get("contradiction_id"): item.get("verdict")
+        for item in contradictions
+        if isinstance(item.get("contradiction_id"), str)
+    }
+
+    def add_trigger_basis(output: Any) -> None:
+        """Union each rec's basis with its trigger findings, in place."""
+        if not isinstance(output, dict):
+            return
+        for rec in output.get("deal_recommendations", []) or []:
+            if not isinstance(rec, dict):
+                continue
+            basis = rec.get("basis_ids")
+            if not isinstance(basis, list):
+                continue
+            for finding_id in trigger_findings.get(rec.get("type"), []):
+                if finding_id not in basis:
+                    basis.append(finding_id)
+
     labeled = _label_payload(payload)
     input_numbers = _number_tokens(json.dumps(labeled))
     client = ModelClient(role="narrative", mode=mode)
@@ -564,12 +706,15 @@ def generate_narrative(
         schema_name="narrative",
         reasoning_effort="medium",
     )
+    add_trigger_basis(output)
     errors = validate_narrative(
         output,
         finding_ids=finding_ids,
         contradiction_ids=contradiction_ids,
         input_numbers=input_numbers,
         required_types=required_types,
+        trigger_findings=trigger_findings,
+        contradiction_verdicts=contradiction_verdicts,
     )
     regenerated = False
     if errors:
@@ -592,12 +737,15 @@ def generate_narrative(
             schema_name="narrative",
             reasoning_effort="medium",
         )
+        add_trigger_basis(output)
         errors = validate_narrative(
             output,
             finding_ids=finding_ids,
             contradiction_ids=contradiction_ids,
             input_numbers=input_numbers,
             required_types=required_types,
+            trigger_findings=trigger_findings,
+            contradiction_verdicts=contradiction_verdicts,
         )
     valid = not errors
     summary = output.get("executive_summary", "")

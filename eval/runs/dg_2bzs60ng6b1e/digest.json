@@ -1,0 +1,1037 @@
+{
+  "schema_version": "1.0.0",
+  "digest_id": "dg_2bzs60ng6b1e",
+  "generated_at": "2026-11-03T02:38:28.643929+00:00",
+  "target": {
+    "name": "Brightwater Fleet Systems",
+    "domain": "brightwaterfleet.example",
+    "revenue_band": "50M-250M",
+    "employee_band": "201-1000"
+  },
+  "mode": {
+    "confidential": false,
+    "demo": true,
+    "providers": [
+      {
+        "role": "orchestrator",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "public_records",
+        "provider": "meta_model_api",
+        "model": "muse-spark-1.3"
+      },
+      {
+        "role": "document_analysis",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "transcription",
+        "provider": "meta_model_api",
+        "model": "muse-voice-transcribe-1.0"
+      },
+      {
+        "role": "claim_extraction",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "crosscheck",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      },
+      {
+        "role": "narrative",
+        "provider": "meta_model_api",
+        "model": "muse-wonder-1.0"
+      }
+    ]
+  },
+  "inputs": {
+    "domain_scan": true,
+    "documents": [
+      {
+        "doc_id": "doc_2bzs60ng6b1e",
+        "type": "soc2_type2",
+        "filename": "brightwater_soc2_type2.md",
+        "sha256": "d48efc43cbc8ad5626a1ea65572681be201490b68183e165d9e6870d8dcdf59c"
+      }
+    ],
+    "interviews": [
+      {
+        "interview_id": "int_2bzs60ng6b1e",
+        "filename": "brightwater_cto_interview.wav",
+        "sha256": "dfec0d51325fc2f141d7d4842dd4e02c3e7101cf9b04410d4fc5850f1681db37",
+        "duration_seconds": 103,
+        "speakers": [
+          "Diligence Lead",
+          "Dana Reyes (CTO)"
+        ]
+      }
+    ]
+  },
+  "overall": {
+    "score": 56.82,
+    "rating": "D",
+    "deal_signal": "escalate_full_diligence",
+    "confidence": "high",
+    "rating_caps_applied": [
+      "CAP-CRIT",
+      "CAP-INCIDENT",
+      "CAP-CONTRADICTION"
+    ]
+  },
+  "function_scores": [
+    {
+      "function": "GV",
+      "score": 29.0,
+      "finding_count": 2,
+      "assessed": true
+    },
+    {
+      "function": "ID",
+      "score": 66.4,
+      "finding_count": 3,
+      "assessed": true
+    },
+    {
+      "function": "PR",
+      "score": 35.2,
+      "finding_count": 8,
+      "assessed": true
+    },
+    {
+      "function": "DE",
+      "score": 82.0,
+      "finding_count": 1,
+      "assessed": true
+    },
+    {
+      "function": "RS",
+      "score": 82.0,
+      "finding_count": 1,
+      "assessed": true
+    },
+    {
+      "function": "RC",
+      "score": 100.0,
+      "finding_count": 0,
+      "assessed": true
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "F-001",
+      "rule_id": "EMAIL-DMARC-NONE",
+      "title": "DMARC not enforced (p=none): domain can be spoofed for BEC/wire fraud",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-001",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_email_auth",
+          "locator": "_dmarc.brightwaterfleet.example TXT",
+          "excerpt": "DMARC record: v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example (policy: none, pct: 100, rua: true)"
+        }
+      ],
+      "deal_impact": "Domain can be spoofed without enforcement, increasing BEC/wire-fraud and phishing risk to customers and deal parties; remediation is low-complexity but requires mail-flow monitoring before enforcement.",
+      "remediation": {
+        "summary": "Move DMARC from p=none to p=quarantine then p=reject, validating SPF/DKIM alignment for all senders.",
+        "cost_low_usd": 8000,
+        "cost_high_usd": 30000,
+        "effort_weeks": 8
+      }
+    },
+    {
+      "finding_id": "F-002",
+      "rule_id": "EMAIL-SPF-SOFT",
+      "title": "SPF uses soft/neutral fail",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-002",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_email_auth",
+          "locator": "brightwaterfleet.example TXT",
+          "excerpt": "SPF record: v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all (qualifier: ~all, lookup_count: 2)"
+        }
+      ],
+      "deal_impact": "Softfail weakens spoofing resistance and undermines DMARC enforcement value; fixing is quick once legitimate senders are confirmed.",
+      "remediation": {
+        "summary": "Confirm all authorized senders, then change SPF qualifier from ~all to -all.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 8000,
+        "effort_weeks": 3
+      }
+    },
+    {
+      "finding_id": "F-003",
+      "rule_id": "DNS-NO-DNSSEC",
+      "title": "DNSSEC not enabled",
+      "severity": "low",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.PS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-003",
+          "source_type": "outside_in",
+          "collection_method": "dns_query",
+          "collector": "check_dnssec",
+          "locator": "brightwaterfleet.example DS",
+          "excerpt": "DNSSEC enabled: false (DS record query for brightwaterfleet.example)"
+        }
+      ],
+      "deal_impact": "Unsigned DNS increases cache-poisoning/spoofing risk, though practical impact is lower than email-auth gaps for deal risk.",
+      "remediation": {
+        "summary": "Enable DNSSEC at registrar/DNS provider and publish DS records, monitoring resolution after signing.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-004",
+      "rule_id": "SURFACE-RISKY-HOSTS",
+      "title": "Publicly logged hostnames suggest exposed admin/legacy/staging systems",
+      "severity": "medium",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-004",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "vpn.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern: vpn; first_seen 2023-02-11, last_seen 2026-09-30"
+        },
+        {
+          "evidence_id": "E-005",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "jenkins-old.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern: jenkins|old; first_seen 2021-06-03, last_seen 2026-08-14"
+        },
+        {
+          "evidence_id": "E-006",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "staging-api.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern: staging; first_seen 2024-01-20, last_seen 2026-10-01"
+        },
+        {
+          "evidence_id": "E-007",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "legacy-portal.brightwaterfleet.example",
+          "excerpt": "Risky hostname pattern: legacy; first_seen 2019-11-05, last_seen 2026-07-22"
+        }
+      ],
+      "deal_impact": "Four publicly logged risky hostnames suggest VPN, legacy CI, staging, and legacy portal exposure that may expand attack surface and require pre-close validation of access controls and ownership.",
+      "remediation": {
+        "summary": "Inventory listed hosts, confirm business need, remove or restrict legacy/staging/admin systems behind VPN/IP allowlists and MFA.",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "effort_weeks": 6
+      }
+    },
+    {
+      "finding_id": "F-005",
+      "rule_id": "SURFACE-SPRAWL",
+      "title": "Large certificate footprint relative to company size",
+      "severity": "low",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.AM",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-008",
+          "source_type": "outside_in",
+          "collection_method": "ct_log_query",
+          "collector": "enumerate_ct_subdomains",
+          "locator": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+          "excerpt": "unique_hostnames: 47; risky_hostnames_count: 4"
+        }
+      ],
+      "deal_impact": "47 unique hostnames for a 201-1000 employee company suggests asset sprawl that may complicate patching, monitoring, and Day-1 control coverage.",
+      "remediation": {
+        "summary": "Reconcile CT hostnames to an authoritative asset inventory, retire stale hosts, and assign owners for the remainder.",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "effort_weeks": 4
+      }
+    },
+    {
+      "finding_id": "F-006",
+      "rule_id": "WEB-LEGACY-TLS",
+      "title": "Deprecated TLS versions offered",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-009",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/",
+          "excerpt": "tls_support: TLSv1.0 true, TLSv1.1 true, TLSv1.2 true; tls_versions: TLSv1.0, TLSv1.1, TLSv1.2"
+        }
+      ],
+      "deal_impact": "Deprecated TLS on www may fail customer/insurer security reviews and indicates inconsistent hardening across web properties, though exploitability is limited.",
+      "remediation": {
+        "summary": "Disable TLSv1.0/TLSv1.1 on www, retain TLSv1.2+ with modern ciphers, and standardize TLS config across hosts.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 15000,
+        "effort_weeks": 4
+      }
+    },
+    {
+      "finding_id": "F-007",
+      "rule_id": "WEB-NO-HSTS",
+      "title": "HSTS not set",
+      "severity": "low",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.DS",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-010",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://brightwaterfleet.example/",
+          "excerpt": "headers: strict-transport-security: null"
+        },
+        {
+          "evidence_id": "E-011",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/",
+          "excerpt": "headers: strict-transport-security: null"
+        }
+      ],
+      "deal_impact": "Missing HSTS on both hosts allows SSL-stripping on first visits and signals basic web hardening gaps; remediation is low effort.",
+      "remediation": {
+        "summary": "Add Strict-Transport-Security with appropriate max-age after confirming HTTPS-only operation on all subdomains.",
+        "cost_low_usd": 1000,
+        "cost_high_usd": 5000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-008",
+      "rule_id": "KEV-POTENTIAL",
+      "title": "Internet-facing appliance listed in CISA KEV (version not verified)",
+      "severity": "critical",
+      "confidence": "medium",
+      "csf_function": "ID",
+      "csf_category": "ID.RA",
+      "source": "outside_in",
+      "evidence": [
+        {
+          "evidence_id": "E-012",
+          "source_type": "outside_in",
+          "collection_method": "offline_lookup",
+          "collector": "match_known_exploited",
+          "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+          "excerpt": "KEV match CVE-PLACEHOLDER-0001: ExampleGate SSL-VPN version 7.0.11, match_tier appliance_exposed, match_level product; note: KEV lists products, not affected versions; version not verified."
+        },
+        {
+          "evidence_id": "E-013",
+          "source_type": "outside_in",
+          "collection_method": "single_https_get",
+          "collector": "check_web_posture",
+          "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+          "excerpt": "Fingerprint: product ExampleGate SSL-VPN, version 7.0.11, kind appliance, source asset_path"
+        }
+      ],
+      "deal_impact": "Potential exposure to a known-exploited internet-facing SSL-VPN appliance (version not verified) could enable remote intrusion and should be a pre-close patch/validation priority; potential exposure only at this stage.",
+      "remediation": {
+        "summary": "Urgently verify ExampleGate SSL-VPN version and patch level against KEV, patch or isolate the appliance, and review VPN logs for compromise.",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 150000,
+        "effort_weeks": 2
+      }
+    },
+    {
+      "finding_id": "F-009",
+      "rule_id": "PUB-INCIDENT-RECENT",
+      "title": "Publicly disclosed security incident in the last 24 months",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "RS",
+      "csf_category": "RS.MA",
+      "source": "public_record",
+      "evidence": [
+        {
+          "evidence_id": "E-014",
+          "source_type": "public_record",
+          "collection_method": "search_grounding",
+          "collector": "search_public_incidents",
+          "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+          "excerpt": "State AG breach notice dated 2025-08-14 (disclosed_within_months: 14): unauthorized access to a customer support system; approx. 3,100 individuals notified. Entity match exact."
+        }
+      ],
+      "deal_impact": "A breach 14 months ago affecting ~3,100 individuals raises regulatory, litigation, notification, and cyber-insurance diligence needs; scope, root cause, and remediation closure should be confirmed pre-close.",
+      "remediation": {
+        "summary": "Obtain incident report, regulator correspondence, and remediation evidence; confirm notification completion, root-cause closure, and any outstanding obligations.",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 100000,
+        "effort_weeks": 6
+      }
+    },
+    {
+      "finding_id": "F-010",
+      "title": "SOC 2 exception in logical access controls (CC6.1)",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.AA",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-015",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "Section 4, CC6.1-01",
+          "excerpt": "Exception noted. 4 of 25 sampled admin accounts were not enforced for MFA. These were service-desk accounts created via a legacy provisioning script that bypassed the conditional access policy."
+        }
+      ],
+      "deal_impact": "MFA bypass for service-desk admin accounts via legacy script.",
+      "remediation": {
+        "summary": "Remediate CC6.1 exception: MFA is enforced for all administrative access to production systems.",
+        "cost_low_usd": 20000,
+        "cost_high_usd": 80000,
+        "effort_weeks": 10
+      },
+      "rule_id": "SOC2-EXCEPTION-ACCESS"
+    },
+    {
+      "finding_id": "F-011",
+      "title": "SOC 2 exception in logical access controls (CC6.2)",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.AA",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-016",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "Section 4, CC6.2-01",
+          "excerpt": "Exception noted. 3 of 15 terminated users retained active access for 6, 11, and 19 business days respectively."
+        }
+      ],
+      "deal_impact": "Terminated users retained access up to 19 business days.",
+      "remediation": {
+        "summary": "Remediate CC6.2 exception: Access for terminated employees is revoked within 1 business day of termination.",
+        "cost_low_usd": 20000,
+        "cost_high_usd": 80000,
+        "effort_weeks": 10
+      },
+      "rule_id": "SOC2-EXCEPTION-ACCESS"
+    },
+    {
+      "finding_id": "F-012",
+      "title": "SOC 2 exception in security monitoring (CC7.2)",
+      "severity": "high",
+      "confidence": "high",
+      "csf_function": "DE",
+      "csf_category": "DE.CM",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-017",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "Section 4, CC7.2-01",
+          "excerpt": "Exception noted. For 2 consecutive weeks (Nov 10\u201323, 2025), alerts were forwarded to a decommissioned distribution list and were not reviewed."
+        }
+      ],
+      "deal_impact": "SIEM alerts unreviewed for two weeks in November 2025.",
+      "remediation": {
+        "summary": "Remediate CC7.2 exception: Security alerts generated by the SIEM are reviewed and triaged daily.",
+        "cost_low_usd": 15000,
+        "cost_high_usd": 60000,
+        "effort_weeks": 6
+      },
+      "rule_id": "SOC2-EXCEPTION-MONITORING"
+    },
+    {
+      "finding_id": "F-013",
+      "title": "SOC 2 exception in change management (CC8.1)",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "PR",
+      "csf_category": "PR.PS",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-018",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "Section 4, CC8.1-01",
+          "excerpt": "Exception noted. 2 of 40 changes lacked documented approval (emergency hotfixes)."
+        }
+      ],
+      "deal_impact": "Emergency hotfixes deployed without documented peer approval.",
+      "remediation": {
+        "summary": "Remediate CC8.1 exception: Production changes are approved by a peer before deployment.",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "effort_weeks": 4
+      },
+      "rule_id": "SOC2-EXCEPTION-CHANGE"
+    },
+    {
+      "finding_id": "F-014",
+      "title": "SOC 2 report period ended more than 90 days ago; no bridge letter provided",
+      "severity": "medium",
+      "confidence": "high",
+      "csf_function": "GV",
+      "csf_category": "GV.OV",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-034",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "brightwater_soc2_type2.md (report period)",
+          "excerpt": "Report period ended 2026-03-31; 213 days before 2026-10-30."
+        }
+      ],
+      "deal_impact": "Report period ended 2026-03-31, 213 days before the assessment date; controls may have changed since.",
+      "remediation": {
+        "summary": "Obtain a bridge letter covering through 2026-10-30.",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "effort_weeks": 3
+      },
+      "rule_id": "SOC2-BRIDGE-GAP"
+    },
+    {
+      "finding_id": "F-015",
+      "title": "Critical subservice organization carved out of SOC 2 scope",
+      "severity": "low",
+      "confidence": "high",
+      "csf_function": "GV",
+      "csf_category": "GV.SC",
+      "source": "document",
+      "evidence": [
+        {
+          "evidence_id": "E-023",
+          "source_type": "document",
+          "collection_method": "document_upload",
+          "collector": "soc2_analyzer",
+          "locator": "Section 1 \u2014 Subservice organizations; Section 3.2",
+          "excerpt": "Nimbus Cloud Services is carved out of scope: Brightwater uses Nimbus Cloud Services (infrastructure hosting) and LedgerPay Payroll (HR and payroll processing, including employee termination records).."
+        }
+      ],
+      "deal_impact": "Nimbus Cloud Services (Brightwater uses Nimbus Cloud Services (infrastructure hosting) and LedgerPay Payroll (HR and payroll processing, including employee termination records).) is carved out of scope and is critical to production or in-scope data.",
+      "remediation": {
+        "summary": "Obtain the Nimbus Cloud Services SOC report and assess carve-out risk.",
+        "cost_low_usd": 0,
+        "cost_high_usd": 5000,
+        "effort_weeks": 2
+      },
+      "rule_id": "SOC2-CARVE-OUT-CRITICAL"
+    }
+  ],
+  "contradictions": [
+    {
+      "contradiction_id": "C-001",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "00:11",
+        "text": "Every admin account is behind MFA. No exceptions. That's been true for years. It's enforced through our conditional access policy.",
+        "claim_type": "control_coverage"
+      },
+      "verdict": "contradicted",
+      "severity": "high",
+      "evidence_refs": [
+        "F-010",
+        "E-015"
+      ],
+      "explanation": "SOC 2 CC6.1 exception: 4 of 25 sampled admin accounts were not enforced for MFA, bypassing conditional access via a legacy provisioning script. This directly contradicts 'every admin account, no exceptions.'"
+    },
+    {
+      "contradiction_id": "C-002",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "00:22",
+        "text": "Offboarding is automated. HR flags the termination and access is revoked same day through our identity provider.",
+        "claim_type": "control_exists"
+      },
+      "verdict": "contradicted",
+      "severity": "high",
+      "evidence_refs": [
+        "F-011",
+        "E-016"
+      ],
+      "explanation": "SOC 2 CC6.2 exception: 3 of 15 terminated users retained active access for 6, 11, and 19 business days, contradicting automated same-day revocation on termination."
+    },
+    {
+      "contradiction_id": "C-003",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "00:33",
+        "text": "We have a 24 7 SOC through our MSSP, every alert gets looked at, nothing sits.",
+        "claim_type": "control_coverage"
+      },
+      "verdict": "contradicted",
+      "severity": "high",
+      "evidence_refs": [
+        "F-012",
+        "E-017"
+      ],
+      "explanation": "SOC 2 CC7.2 exception: for 2 consecutive weeks (Nov 10-23, 2025), alerts went to a decommissioned distribution list and were not reviewed, contradicting that every alert gets looked at with nothing sitting."
+    },
+    {
+      "contradiction_id": "C-004",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "00:48",
+        "text": "We're fully locked down there. DMARC is enforced. Nobody can spoof our domain.",
+        "claim_type": "control_exists"
+      },
+      "verdict": "contradicted",
+      "severity": "high",
+      "evidence_refs": [
+        "F-001",
+        "E-001"
+      ],
+      "explanation": "DMARC record is v=DMARC1; p=none, which is monitoring only and does not enforce rejection/quarantine. The domain can be spoofed, contradicting 'DMARC is enforced.'"
+    },
+    {
+      "contradiction_id": "C-005",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "00:58",
+        "text": "No, nothing material. We've never had a breach.",
+        "claim_type": "incident_history"
+      },
+      "verdict": "contradicted",
+      "severity": "high",
+      "evidence_refs": [
+        "F-009",
+        "E-014"
+      ],
+      "explanation": "State AG breach notice dated 2025-08-14 reports unauthorized access to a customer support system with approx. 3,100 individuals notified, contradicting 'never had a breach.'"
+    },
+    {
+      "contradiction_id": "C-006",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "01:08",
+        "text": "We decommissioned the legacy stuff a while back. Everything external goes through the main app and the VPN.",
+        "claim_type": "control_exists"
+      },
+      "verdict": "contradicted",
+      "severity": "medium",
+      "evidence_refs": [
+        "F-004",
+        "E-005",
+        "E-007"
+      ],
+      "explanation": "CT log presence alone doesn't prove a host is live; however, certificates for legacy-portal (last_seen 2026-07-22) and jenkins-old (2026-08-14) within the last 12 months show these legacy systems are still actively maintained, contradicting decommissioning."
+    },
+    {
+      "contradiction_id": "C-007",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "01:16",
+        "text": "Annual third party test. The last one came back clean. No highs.",
+        "claim_type": "third_party_assurance"
+      },
+      "verdict": "contradicted",
+      "severity": "medium",
+      "evidence_refs": [
+        "E-022",
+        "E-030"
+      ],
+      "explanation": "CC4.1 evidence states 2 high-severity findings were reported in the third-party test, contradicting 'came back clean, no highs.'"
+    },
+    {
+      "contradiction_id": "C-008",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "01:24",
+        "text": "Daily backups to immutable storage in a second region and we do a restore test every quarter.",
+        "claim_type": "control_coverage"
+      },
+      "verdict": "supported",
+      "severity": "info",
+      "evidence_refs": [
+        "E-021"
+      ],
+      "explanation": "SOC 2 A1.2-01 backup/restore control was tested with no exceptions noted, providing positive evidence supporting the backup and quarterly restore-test claim."
+    },
+    {
+      "contradiction_id": "C-009",
+      "claim": {
+        "speaker": "Dana Reyes (CTO)",
+        "timestamp": "01:35",
+        "text": "We can get one. one we haven't needed it so far.",
+        "claim_type": "third_party_assurance"
+      },
+      "verdict": "supported",
+      "severity": "info",
+      "evidence_refs": [
+        "E-031",
+        "F-014"
+      ],
+      "explanation": "Report period ended 2026-03-31 with no bridge letter provided, but E-031 states management plans to obtain a bridge letter covering April 1, 2026 forward upon request, corroborating that one can be obtained."
+    }
+  ],
+  "remediation_plan": {
+    "items": [
+      {
+        "action": "Move DMARC from p=none to p=quarantine then p=reject, validating SPF/DKIM alignment for all senders.",
+        "finding_ids": [
+          "F-001"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 8000,
+        "cost_high_usd": 30000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Confirm all authorized senders, then change SPF qualifier from ~all to -all.",
+        "finding_ids": [
+          "F-002"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 8000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Enable DNSSEC at registrar/DNS provider and publish DS records, monitoring resolution after signing.",
+        "finding_ids": [
+          "F-003"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Inventory listed hosts, confirm business need, remove or restrict legacy/staging/admin systems behind VPN/IP allowlists and MFA.",
+        "finding_ids": [
+          "F-004"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 10000,
+        "cost_high_usd": 50000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Reconcile CT hostnames to an authoritative asset inventory, retire stale hosts, and assign owners for the remainder.",
+        "finding_ids": [
+          "F-005"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Disable TLSv1.0/TLSv1.1 on www, retain TLSv1.2+ with modern ciphers, and standardize TLS config across hosts.",
+        "finding_ids": [
+          "F-006"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 15000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Add Strict-Transport-Security with appropriate max-age after confirming HTTPS-only operation on all subdomains.",
+        "finding_ids": [
+          "F-007"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 1000,
+        "cost_high_usd": 5000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Urgently verify ExampleGate SSL-VPN version and patch level against KEV, patch or isolate the appliance, and review VPN logs for compromise.",
+        "finding_ids": [
+          "F-008"
+        ],
+        "window": "days_0_30",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 150000,
+        "owner_role": "IT Ops"
+      },
+      {
+        "action": "Obtain incident report, regulator correspondence, and remediation evidence; confirm notification completion, root-cause closure, and any outstanding obligations.",
+        "finding_ids": [
+          "F-009"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 25000,
+        "cost_high_usd": 100000,
+        "owner_role": "Incident Response"
+      },
+      {
+        "action": "Remediate CC6.1 exception: MFA is enforced for all administrative access to production systems.",
+        "finding_ids": [
+          "F-010"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 20000,
+        "cost_high_usd": 80000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Remediate CC6.2 exception: Access for terminated employees is revoked within 1 business day of termination.",
+        "finding_ids": [
+          "F-011"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 20000,
+        "cost_high_usd": 80000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Remediate CC7.2 exception: Security alerts generated by the SIEM are reviewed and triaged daily.",
+        "finding_ids": [
+          "F-012"
+        ],
+        "window": "days_31_60",
+        "cost_low_usd": 15000,
+        "cost_high_usd": 60000,
+        "owner_role": "SecOps"
+      },
+      {
+        "action": "Remediate CC8.1 exception: Production changes are approved by a peer before deployment.",
+        "finding_ids": [
+          "F-013"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 5000,
+        "cost_high_usd": 20000,
+        "owner_role": "Security Engineering"
+      },
+      {
+        "action": "Obtain a bridge letter covering through 2026-10-30.",
+        "finding_ids": [
+          "F-014"
+        ],
+        "window": "days_61_100",
+        "cost_low_usd": 2000,
+        "cost_high_usd": 10000,
+        "owner_role": "CISO/Board"
+      },
+      {
+        "action": "Obtain the Nimbus Cloud Services SOC report and assess carve-out risk.",
+        "finding_ids": [
+          "F-015"
+        ],
+        "window": "post_100",
+        "cost_low_usd": 0,
+        "cost_high_usd": 5000,
+        "owner_role": "CISO/Board"
+      }
+    ],
+    "total_cost_low_usd": 142000,
+    "total_cost_high_usd": 643000
+  },
+  "deal_recommendations": [
+    {
+      "type": "closing_condition",
+      "text": "Closing condition: Given the deal signal to escalate and complete full cyber diligence before signing, make signing conditional on Days 0\u201330 verification and compromise assessment of the internet-facing VPN appliance and a bring-down of security representations at signing [F-008].",
+      "basis_ids": [
+        "F-008",
+        "C-008",
+        "C-001",
+        "C-002",
+        "C-003",
+        "C-004",
+        "C-005",
+        "C-006",
+        "C-007"
+      ]
+    },
+    {
+      "type": "full_diligence_scope",
+      "text": "Full diligence scope: Given the deal signal to escalate and complete full cyber diligence before signing, commission Days 0\u201330 and Days 31\u201360 diligence covering the scope and exploitability of the known-exploited-vulnerability-listed VPN exposure and independent validation of management representations [F-008] [C-001] [C-005].",
+      "basis_ids": [
+        "F-008",
+        "C-001",
+        "C-005",
+        "F-004"
+      ]
+    },
+    {
+      "type": "specific_indemnity",
+      "text": "Specific indemnity: Given the deal signal to escalate and complete full cyber diligence before signing, seek a specific indemnity for pre-closing incident losses, with diligence and any related remediation tracked through Days 31\u201360 [F-009].",
+      "basis_ids": [
+        "F-009",
+        "C-005"
+      ]
+    },
+    {
+      "type": "rw_insurance_note",
+      "text": "Representations and warranties insurance: Given the deal signal to escalate and complete full cyber diligence before signing, assume the known incident is likely excluded from representations and warranties coverage and confirm the position during Days 0\u201330 diligence [F-009].",
+      "basis_ids": [
+        "F-009",
+        "C-005"
+      ]
+    },
+    {
+      "type": "cyber_insurance",
+      "text": "Cyber insurance: Given the deal signal to escalate and complete full cyber diligence before signing, treat cyber insurance as a likely underwriting requirement and confirm insurability before close during Days 0\u201330 [F-009] [F-008].",
+      "basis_ids": [
+        "F-009",
+        "F-008",
+        "C-005"
+      ]
+    },
+    {
+      "type": "post_close_covenant",
+      "text": "Post-close covenant: Given the deal signal to escalate and complete full cyber diligence before signing, impose a post-close covenant to complete remediation across Days 31\u201360, Days 61\u2013100 and After day 100, including email authentication, access, monitoring and exposed-system remediation [F-001] [F-010] [F-011] [F-012].",
+      "basis_ids": [
+        "F-001",
+        "F-010",
+        "F-011",
+        "F-012",
+        "F-002",
+        "F-004",
+        "F-006"
+      ]
+    },
+    {
+      "type": "price_adjustment",
+      "text": "Price adjustment: Given the deal signal to escalate and complete full cyber diligence before signing, no price adjustment is warranted because the $142K\u2013$643K remediation total is immaterial relative to the 50M-250M revenue band, with spend sequenced across Days 0\u201330 through After day 100 [F-008] [F-009].",
+      "basis_ids": [
+        "F-001",
+        "F-008",
+        "F-009"
+      ]
+    }
+  ],
+  "narrative": {
+    "executive_summary": "Bottom line: Escalate: full cyber diligence required before signing. It is rated D at 56.82 due to a critical, potentially exploitable exposure [F-008], a publicly disclosed incident within 24 months [F-009], and multiple management statements contradicted by evidence [C-001] [C-005].\n\nKey risks: The VPN appliance needs urgent version, patch and compromise validation [F-008]. The domain can be spoofed because email authentication is not enforced [F-001]. Administrators lacked multifactor authentication and terminated users retained access [F-010] [F-011]. Security alerts went unreviewed and the prior incident affected approximately 3,100 individuals [F-012] [F-009].\n\nManagement credibility: Of 9 items, 7 were contradicted and 2 supported, spanning access, offboarding, monitoring, email authentication, incident history, legacy systems and third-party testing [C-001] [C-002] [C-003] [C-004] [C-005] [C-006] [C-007].\n\nNext steps: Complete full diligence before signing, starting with Days 0\u201330 VPN verification, then Days 31\u201360 incident, email, access and monitoring remediation planning [F-008] [F-009] [F-001] [F-010] [F-012].",
+    "key_questions_for_management": [
+      "Provide evidence of the VPN appliance version, patch level, isolation status and compromise review, including relevant VPN logs [F-008].",
+      "Reconcile the statement that every administrator uses multifactor authentication with the sampled accounts that were not enforced [C-001] [F-010].",
+      "Reconcile the same-day offboarding statement with terminated users retaining access for 6, 11, and 19 business days [C-002] [F-011].",
+      "Provide the incident report, regulator correspondence and remediation closure evidence for the incident affecting approximately 3,100 individuals [F-009] [C-005].",
+      "Confirm the plan and timetable to move email authentication from monitoring to enforcement and strengthen sender validation [F-001] [F-002].",
+      "Provide evidence that security alerts are now reviewed daily and reconcile the two-week period when alerts were not reviewed [C-003] [F-012].",
+      "Reconcile the claimed decommissioning of legacy systems with the current inventory, ownership and access controls for publicly logged legacy, staging and administrative hosts [C-006] [F-004] [F-005]."
+    ]
+  },
+  "limitations": [
+    "Passive outside-in assessment only; no authenticated or internal testing",
+    "KEV matches are product-level; versions not verified",
+    "Demo mode: signals from fixtures"
+  ],
+  "trace_ref": "/Users/jjpowell/code/pe-risk-key/eval/runs/dg_2bzs60ng6b1e/trace.jsonl",
+  "soc2_analysis": {
+    "doc_id": "doc_2bzs60ng6b1e",
+    "report_type": "type2",
+    "period_start": "2025-04-01",
+    "period_end": "2026-03-31",
+    "auditor": "Halvorsen & Pike LLP",
+    "opinion": "unqualified",
+    "trust_services_categories": [
+      "security",
+      "availability"
+    ],
+    "exceptions": [
+      {
+        "control_id": "CC6.1",
+        "description": "MFA is enforced for all administrative access to production systems.",
+        "deviations": 4,
+        "sample_size": 25,
+        "locator": "Section 4, CC6.1-01",
+        "management_response": "Management disabled the legacy provisioning script in April 2026 and has begun migrating service-desk accounts to the standard conditional access policy. Migration expected to complete Q3 2026.",
+        "finding_id": "F-010"
+      },
+      {
+        "control_id": "CC6.2",
+        "description": "Access for terminated employees is revoked within 1 business day of termination.",
+        "deviations": 3,
+        "sample_size": 15,
+        "locator": "Section 4, CC6.2-01",
+        "management_response": "Management is evaluating an automated HR-to-IdP de-provisioning integration. Until then, terminations are processed manually by IT upon email notification from HR.",
+        "finding_id": "F-011"
+      },
+      {
+        "control_id": "CC7.2",
+        "description": "Security alerts generated by the SIEM are reviewed and triaged daily.",
+        "deviations": null,
+        "sample_size": 30,
+        "locator": "Section 4, CC7.2-01",
+        "management_response": "The distribution list was corrected on November 24, 2025. Management has added a weekly check that alert routing is functioning.",
+        "finding_id": "F-012"
+      },
+      {
+        "control_id": "CC8.1",
+        "description": "Production changes are approved by a peer before deployment.",
+        "deviations": 2,
+        "sample_size": 40,
+        "locator": "Section 4, CC8.1-01",
+        "management_response": "Management has updated the emergency change procedure to require post-deployment approval within 48 hours.",
+        "finding_id": "F-013"
+      }
+    ],
+    "subservice_orgs": [
+      {
+        "name": "Nimbus Cloud Services",
+        "method": "carve_out",
+        "services": "Brightwater uses Nimbus Cloud Services (infrastructure hosting) and LedgerPay Payroll (HR and payroll processing, including employee termination records).",
+        "critical": true
+      },
+      {
+        "name": "LedgerPay Payroll",
+        "method": "carve_out",
+        "services": "Brightwater uses Nimbus Cloud Services (infrastructure hosting) and LedgerPay Payroll (HR and payroll processing, including employee termination records).",
+        "critical": false
+      }
+    ],
+    "cuecs": [
+      "Provisioning and de-provisioning their own users' access to the Brightwater platform.",
+      "Enabling SSO/MFA for their users through the customer administration console.",
+      "Reviewing user access to the platform at least quarterly.",
+      "Notifying Brightwater promptly of suspected security incidents involving their accounts.",
+      "Securing API credentials issued to them."
+    ],
+    "bridge_gap_days": 213
+  }
+}

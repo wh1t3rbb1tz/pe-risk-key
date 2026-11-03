@@ -28,7 +28,11 @@ from pe_risk_key.analyzers.interview import (
     extract_claims,
     transcribe_interview,
 )
-from pe_risk_key.analyzers.soc2 import SOC2Result, analyze_soc2
+from pe_risk_key.analyzers.soc2 import (
+    SOC2Result,
+    analyze_soc2,
+    normalize_quote,
+)
 from pe_risk_key.agent.prompts import (
     coverage_followup,
     system_prompt,
@@ -340,6 +344,54 @@ def _run_soc2_analysis(
 _REPORT_TYPE_TO_DOC = {"type1": "soc2_type1", "type2": "soc2_type2"}
 
 
+def dedupe_evidence_pool(
+    findings: list[dict[str, Any]], evidence_pool: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Drop pool items duplicating an earlier id's excerpt and locator.
+
+    Matching uses the normalized excerpt plus the exact locator; the
+    first id wins and findings' evidence refs remap to it. Inputs are
+    not mutated.
+    """
+    seen: dict[tuple[str, Any], str] = {}
+    remap: dict[str, str] = {}
+    deduped: list[dict[str, Any]] = []
+    for item in evidence_pool:
+        key = (
+            normalize_quote(item.get("excerpt", "") or ""),
+            item.get("locator"),
+        )
+        if key in seen:
+            remap[item["evidence_id"]] = seen[key]
+        else:
+            seen[key] = item["evidence_id"]
+            deduped.append(item)
+    if not remap:
+        return findings, evidence_pool
+    merged = copy.deepcopy(findings)
+    for finding in merged:
+        for item in finding.get("evidence", []):
+            if item.get("evidence_id") in remap:
+                item["evidence_id"] = remap[item["evidence_id"]]
+    return merged, deduped
+
+
+def _model_invoked(tool_name: str, collector_outputs: dict[str, Any]) -> bool:
+    """Whether a collector step invoked its model in this run.
+
+    Fixture-served (DEMO_MODE), cache-served, and never-ran steps did
+    not invoke anything, so they contribute no provider entry.
+    """
+    if os.getenv("DEMO_MODE") == "1":
+        return False
+    output = collector_outputs.get(tool_name)
+    if not isinstance(output, dict):
+        return False
+    if output.get("cached") is True:
+        return False
+    return output.get("status") != "error" or "usage" in output
+
+
 def _run_interview(
     ctx: RunContext,
     interview_path: str | Path,
@@ -398,6 +450,7 @@ def _assemble_digest(
     ran_crosscheck: bool = False,
     narrative: dict[str, Any] | None = None,
     deal_recommendations: list[dict[str, Any]] | None = None,
+    transcript_cached: bool = False,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -415,7 +468,7 @@ def _assemble_digest(
             "model": client.model,
         }
     ]
-    if "search_public_incidents" in collector_outputs:
+    if _model_invoked("search_public_incidents", collector_outputs):
         providers.append(
             {
                 "role": "public_records",
@@ -445,13 +498,14 @@ def _assemble_digest(
     interviews: list[dict[str, Any]] = []
     if interview_entry is not None:
         interviews.append(interview_entry)
-        providers.append(
-            {
-                "role": "transcription",
-                "provider": STANDARD_PROVIDER,
-                "model": VOICE_MODEL,
-            }
-        )
+        if not transcript_cached:
+            providers.append(
+                {
+                    "role": "transcription",
+                    "provider": STANDARD_PROVIDER,
+                    "model": VOICE_MODEL,
+                }
+            )
         providers.append(
             {
                 "role": "claim_extraction",
@@ -488,6 +542,11 @@ def _assemble_digest(
             "domain_scan": True,
             "documents": documents,
             "interviews": interviews,
+            **(
+                {"served_from_fixture": True}
+                if os.getenv("DEMO_MODE") == "1"
+                else {}
+            ),
         },
         "overall": scored["overall"],
         "function_scores": scored["function_scores"],
@@ -796,6 +855,7 @@ def run_digest(
         )
         merged.extend(soc2_findings)
         evidence_pool.extend(soc2_pool)
+    merged, evidence_pool = dedupe_evidence_pool(merged, evidence_pool)
     (run_dir / "evidence_pool.json").write_text(
         json.dumps({"evidence": evidence_pool}, indent=2), encoding="utf-8"
     )
@@ -920,6 +980,9 @@ def run_digest(
         ran_crosscheck=crosscheck_result is not None,
         narrative=narrative_result["narrative"],
         deal_recommendations=narrative_result["deal_recommendations"],
+        transcript_cached=bool(
+            interview_data is not None and interview_data[0].get("cached")
+        ),
     )
     digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
     (run_dir / "digest.json").write_text(

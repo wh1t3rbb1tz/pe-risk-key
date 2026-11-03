@@ -480,11 +480,6 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
             "model": "muse-wonder-1.0",
         },
         {
-            "role": "public_records",
-            "provider": "meta_model_api",
-            "model": "muse-spark-1.3",
-        },
-        {
             "role": "narrative",
             "provider": "meta_model_api",
             "model": "muse-wonder-1.0",
@@ -494,6 +489,7 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
         "domain_scan": True,
         "documents": [],
         "interviews": [],
+        "served_from_fixture": True,
     }
     assert [f["finding_id"] for f in digest["findings"]] == ["F-001", "F-002"]
     assert digest["contradictions"] == []
@@ -1350,3 +1346,46 @@ def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
     failed = [e for e in trace if e["type"] == "narrative_validation_failed"]
     assert len(failed) == 1
     assert any("exposure" in e or "F-999" in e for e in failed[0]["errors"])
+
+
+def test_dedupe_evidence_pool_remaps_refs():
+    from pe_risk_key.agent.orchestrator import dedupe_evidence_pool
+
+    findings = [
+        {
+            "finding_id": "F-001",
+            "evidence": [{"evidence_id": "E-001", "excerpt": "Same."}],
+        },
+        {
+            "finding_id": "F-002",
+            "evidence": [{"evidence_id": "E-002", "excerpt": "Same."}],
+        },
+    ]
+    pool = [
+        {"evidence_id": "E-001", "excerpt": "No DMARC record.", "locator": "L"},
+        {
+            "evidence_id": "E-002",
+            "excerpt": "No  DMARC   record.",
+            "locator": "L",
+        },
+        {"evidence_id": "E-003", "excerpt": "No DMARC record.", "locator": "N"},
+    ]
+    new_findings, new_pool = dedupe_evidence_pool(findings, pool)
+    assert [item["evidence_id"] for item in new_pool] == ["E-001", "E-003"]
+    assert new_findings[0]["evidence"][0]["evidence_id"] == "E-001"
+    assert new_findings[1]["evidence"][0]["evidence_id"] == "E-001"
+    assert pool[1]["evidence_id"] == "E-002"
+    assert findings[1]["evidence"][0]["evidence_id"] == "E-002"
+
+
+def test_cached_transcription_omits_provider(agent_env, monkeypatch, tmp_path):
+    _run_interview_digest(agent_env, monkeypatch, tmp_path)
+    result = _run_interview_digest(agent_env, monkeypatch, tmp_path)
+    roles = [
+        p["role"]
+        for p in _read_digest(result)["mode"]["providers"]
+    ]
+    assert "transcription" not in roles
+    assert "claim_extraction" in roles
+    assert "crosscheck" in roles
+    assert result["usage"]["components"]["transcription"]["cached"] is True

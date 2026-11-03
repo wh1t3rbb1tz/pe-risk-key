@@ -58,6 +58,38 @@ VOICE_MODEL = "muse-voice-transcribe-1.0"
 # Standard-mode Muse Wonder prices per 1M tokens, per
 # https://dev.meta.ai/docs/pricing-rate-limits.
 WONDER_USD_PER_MTOK = {"input": 4.0, "cached": 0.20, "output": 20.0}
+# Muse Voice Transcribe price per hour of audio, per
+# https://dev.meta.ai/docs/pricing-rate-limits.
+TRANSCRIPTION_USD_PER_AUDIO_HOUR = 0.18
+
+
+def estimate_transcription_cost_usd(duration_seconds: float) -> float:
+    """Transcription cost for audio of the given length in seconds."""
+    return round(
+        max(0.0, duration_seconds)
+        / 3600
+        * TRANSCRIPTION_USD_PER_AUDIO_HOUR,
+        6,
+    )
+
+
+def estimate_token_cost_usd(
+    usage: dict[str, int], prices_per_mtok: dict[str, float]
+) -> float:
+    """Token cost for a usage dict under per-1M-token prices."""
+    billable = max(
+        0, usage.get("prompt_tokens", 0) - usage.get("cached_tokens", 0)
+    )
+    return round(
+        (
+            billable * prices_per_mtok["input"]
+            + usage.get("cached_tokens", 0) * prices_per_mtok["cached"]
+            + usage.get("completion_tokens", 0)
+            * prices_per_mtok["output"]
+        )
+        / 1_000_000,
+        6,
+    )
 # Cheap sub-tasks: grounded public-records searches.
 SPARK_MODEL = "muse-spark-1.3"
 

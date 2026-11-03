@@ -173,6 +173,29 @@ def estimate_cost(usage: dict[str, int]) -> float:
     ) / 1_000_000
 
 
+def merge_usage_breakdown(
+    components: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Combine per-component usage dicts into a breakdown plus totals.
+
+    Each component reports its token counters and estimated_cost_usd;
+    transcription reports audio_hours instead of tokens. New pipeline
+    stages (transcription, claim_extraction, crosscheck, narrative) add
+    entries under their own names; totals sum the shared keys.
+    """
+    breakdown = {name: dict(values) for name, values in components.items()}
+    totals: dict[str, Any] = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cached_tokens": 0,
+        "estimated_cost_usd": 0.0,
+    }
+    for values in breakdown.values():
+        for key in totals:
+            totals[key] += values.get(key, 0)
+    return {"components": breakdown, **totals}
+
+
 def _assistant_message(
     text: str, calls: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -697,10 +720,18 @@ def run_digest(
         raise ValueError(
             "Assembled digest failed validation: " + "; ".join(digest_errors)
         )
-    usage = {
-        **client.total_usage,
-        "estimated_cost_usd": estimate_cost(client.total_usage),
+    components: dict[str, dict[str, Any]] = {
+        "orchestrator": {
+            **client.total_usage,
+            "estimated_cost_usd": estimate_cost(client.total_usage),
+        }
     }
+    if soc2_result is not None:
+        components["document_analysis"] = {
+            **soc2_result.usage,
+            "estimated_cost_usd": soc2_result.estimated_cost_usd,
+        }
+    usage = merge_usage_breakdown(components)
     ctx.trace.event("run_end", usage=usage)
     return {
         "digest_id": digest_id,

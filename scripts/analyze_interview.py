@@ -1,0 +1,111 @@
+"""Transcribe an interview and extract security claims.
+
+Makes live API calls (transcription + one Muse Wonder call);
+run manually, not from the test suite.
+"""
+
+import argparse
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+RUNS_DIR = ROOT / "eval" / "runs"
+
+
+def print_turns(transcript) -> None:
+    turns = transcript["turns"]
+    print(f"\nturns ({len(turns)}):")
+    if not turns:
+        print("  -")
+        return
+    for turn in turns:
+        speaker = turn["speaker_name"] or turn["speaker_label"]
+        print(f"  [{turn['start']}] {speaker}: {turn['text']}")
+
+
+def print_claims(claims) -> None:
+    print(f"\nclaims ({len(claims)}):")
+    if not claims:
+        print("  -")
+        return
+    for claim in claims:
+        print(
+            f"  C-{claim['claim_index']:03d} [{claim['timestamp']}] "
+            f"{claim['speaker']} ({claim['claim_type']})"
+        )
+        print(f"    {claim['text'][:200]}")
+
+
+def print_drops(result) -> None:
+    dropped = result["dropped_unquoted"] + result["dropped_not_target"]
+    print(f"\ndrops ({len(dropped)}):")
+    if not dropped:
+        print("  -")
+        return
+    for drop in result["dropped_unquoted"]:
+        print(f"  turn {drop['turn_index']} ({drop['speaker']}): unquoted")
+        print(f"    closest window: {drop.get('closest_window', '')[:160]}")
+        print(f"    similarity: {drop.get('similarity_ratio', 0.0)}")
+    for drop in result["dropped_not_target"]:
+        print(
+            f"  turn {drop.get('turn_index', '?')}: {drop['reason']} "
+            f"({drop.get('speaker')})"
+        )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--file", required=True)
+    parser.add_argument("--speakers", default="")
+    parser.add_argument("--target", required=True, action="append")
+    args = parser.parse_args()
+
+    from pe_risk_key.analyzers import extract_claims, transcribe_interview
+
+    interview_id = "iv_" + re.sub(
+        r"[^a-z0-9]+", "", Path(args.file).stem.lower()
+    )
+    speaker_names = (
+        [name for name in args.speakers.split(",") if name]
+        if args.speakers
+        else None
+    )
+    transcript = transcribe_interview(
+        args.file, interview_id, speaker_names=speaker_names
+    )
+    result = extract_claims(transcript, args.target)
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_path = RUNS_DIR / f"interview_{stamp}.json"
+    run_path.write_text(
+        json.dumps(
+            {
+                "created_at": stamp,
+                "interview_id": interview_id,
+                "transcript": transcript,
+                "claims": result,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"=== analyze_interview: {args.file} ({interview_id}) ===")
+    print(
+        f"\nduration: {transcript['duration_seconds']:.1f}s"
+        + (" (cached transcript)" if transcript["cached"] else "")
+    )
+    print_turns(transcript)
+    print_claims(result["claims"])
+    print_drops(result)
+    total = transcript["estimated_cost_usd"] + result["estimated_cost_usd"]
+    print(f"\ncost: transcription=${transcript['estimated_cost_usd']:.4f} "
+          f"extraction=${result['estimated_cost_usd']:.4f} "
+          f"total=${total:.4f}")
+    print(f"saved: {run_path.relative_to(ROOT)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

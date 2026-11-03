@@ -2,8 +2,8 @@
 
 One Muse Wonder call extracts the report into a strict schema; code then
 verifies every quote against the source text, computes the bridge gap,
-and builds findings deterministically from scoring.yaml rules. Not yet
-wired into the orchestrator.
+and builds findings deterministically from scoring.yaml rules. Wired
+into the orchestrator via run_digest(..., soc2_path=...).
 """
 
 from __future__ import annotations
@@ -53,7 +53,8 @@ SYSTEM_PROMPT = """You extract a SOC 2 report into structured data. Rules:
 6. critical is true for a subservice org only if it hosts production systems or processes the data in scope.
 7. notable_observations are items that are not exceptions but matter for diligence: pen-test findings noted in a "no exceptions" row, unaudited management statements about bridge letters, scope limits. Each needs text, a locator, and a verbatim quote.
 8. bridge_letter_provided is true only if a bridge letter covers the gap through the assessment date given with the report.
-9. Report deviations and sample_size counts only if stated verbatim in the report; otherwise null. Never calculate or estimate counts."""
+9. Report deviations and sample_size counts only if stated verbatim in the report; otherwise null. Never calculate or estimate counts.
+10. controls_tested lists every control row in the results table, including rows with no exceptions. result is exception when the row states deviations and no_exception otherwise."""
 
 
 @dataclass
@@ -67,6 +68,7 @@ class SOC2Result:
     opinion_verified: bool
     soc2_analysis: dict[str, Any]
     notable_observations: list[dict[str, Any]]
+    controls_tested: list[dict[str, Any]]
     signals: dict[str, Any]
     evidence_pool: list[dict[str, Any]]
     findings: list[dict[str, Any]]
@@ -108,7 +110,7 @@ _TYPO_TRANSLATE = str.maketrans(
 )
 
 
-def _normalize(text: str) -> str:
+def normalize_quote(text: str) -> str:
     """Markdown-aware normalization, applied identically to source/quote."""
     text = text.replace("`", "").replace("*", "").replace("_", "")
     text = text.replace("|", " ")
@@ -144,8 +146,8 @@ def _closest_window(quote: str, source: str) -> tuple[str, float]:
     return best[0], round(best[1], 3)
 
 
-def _verify_quote(
-    quote: Any, normalized_source: str
+def verify_quote(
+    quote: Any, normalized_source: str, max_chars: int = MAX_QUOTE_CHARS
 ) -> tuple[str | None, dict[str, Any]]:
     """Verbatim check after normalization; strict only, no fuzzy matching.
 
@@ -154,8 +156,8 @@ def _verify_quote(
     """
     if not isinstance(quote, str):
         return None, {"closest_window": "", "similarity_ratio": 0.0}
-    truncated = quote.strip()[:MAX_QUOTE_CHARS]
-    normalized = _normalize(truncated)
+    truncated = quote.strip()[:max_chars]
+    normalized = normalize_quote(truncated)
     if not normalized.strip(". "):
         return None, {"closest_window": "", "similarity_ratio": 0.0}
     if "..." in normalized:
@@ -180,6 +182,14 @@ _CRITERION_RE = re.compile(r"^((?:CC|A|C|PI|P)\d+\.\d+)")
 _NUMBER_RE = re.compile(r"\d+")
 
 
+def _criterion_from_ref(candidate: Any) -> str | None:
+    """Leading criterion of a control ref (CC6.1-01 -> CC6.1), or None."""
+    if not isinstance(candidate, str):
+        return None
+    match = _CRITERION_RE.match(candidate.strip().upper())
+    return match.group(1) if match else None
+
+
 def _derive_criteria(exceptions: list[dict]) -> None:
     """Set each control_id to its leading criterion, in place.
 
@@ -190,16 +200,14 @@ def _derive_criteria(exceptions: list[dict]) -> None:
     for item in exceptions:
         for key in ("control_ref", "control_id"):
             candidate = item.get(key)
-            if not isinstance(candidate, str):
+            criterion = _criterion_from_ref(candidate)
+            if criterion is None:
                 continue
-            match = _CRITERION_RE.match(candidate.strip().upper())
-            if match is None:
-                continue
-            if candidate.strip() != match.group(1) and not item.get(
+            if candidate.strip() != criterion and not item.get(
                 "control_ref"
             ):
                 item["control_ref"] = candidate.strip()
-            item["control_id"] = match.group(1)
+            item["control_id"] = criterion
             break
 
 
@@ -215,7 +223,7 @@ def _ground_counts(exceptions: list[dict]) -> None:
             int(token)
             for text in (item.get("quote"), item.get("auditor_test"))
             for token in _NUMBER_RE.findall(
-                _normalize(text if isinstance(text, str) else "")
+                normalize_quote(text if isinstance(text, str) else "")
             )
         }
         ungrounded = False
@@ -245,7 +253,7 @@ def _filter_items(
             no_locator.append({"type": kind, "ref": ref})
             continue
         if "quote" in item:
-            verified, diagnostics = _verify_quote(
+            verified, diagnostics = verify_quote(
                 item.get("quote"), normalized_source
             )
             if verified is None:
@@ -315,8 +323,12 @@ def analyze_soc2(
         reasoning_effort="medium",
     )
 
-    normalized_source = _normalize(source_text)
+    normalized_source = normalize_quote(source_text)
     _derive_criteria(extraction.get("exceptions", []))
+    for tested in extraction.get("controls_tested", []):
+        criterion = _criterion_from_ref(tested.get("control_ref"))
+        if criterion is not None:
+            tested["criterion"] = criterion
     dropped_unquoted: list[dict] = []
     dropped_no_locator: list[dict] = []
     exceptions, unquoted, no_loc = _filter_items(
@@ -324,6 +336,14 @@ def analyze_soc2(
         "exception",
         normalized_source,
         "control_id",
+    )
+    dropped_unquoted.extend(unquoted)
+    dropped_no_locator.extend(no_loc)
+    controls_tested, unquoted, no_loc = _filter_items(
+        extraction.get("controls_tested", []),
+        "tested_control",
+        normalized_source,
+        "control_ref",
     )
     dropped_unquoted.extend(unquoted)
     dropped_no_locator.extend(no_loc)
@@ -348,7 +368,7 @@ def analyze_soc2(
     dropped_no_locator.extend(no_loc)
     _ground_counts(exceptions)
 
-    opinion_quote, opinion_diagnostics = _verify_quote(
+    opinion_quote, opinion_diagnostics = verify_quote(
         extraction.get("opinion_quote"), normalized_source
     )
     if opinion_quote is None:
@@ -392,6 +412,9 @@ def analyze_soc2(
     exception_evidence = [
         add_evidence(item["locator"], item["quote"]) for item in exceptions
     ]
+    for tested in controls_tested:
+        if tested.get("result") == "no_exception":
+            add_evidence(tested["locator"], tested["quote"])
     carve_outs = [org for org in orgs if org.get("method") == "carve_out"]
     carve_evidence = [
         add_evidence(
@@ -554,6 +577,7 @@ def analyze_soc2(
         opinion_verified=opinion_verified,
         soc2_analysis=soc2_analysis,
         notable_observations=notables,
+        controls_tested=controls_tested,
         signals={
             "exceptions": [
                 {

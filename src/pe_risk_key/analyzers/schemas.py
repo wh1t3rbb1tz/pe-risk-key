@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pe_risk_key.schemas import claim_type_enum
+
 
 def soc2_extraction_schema() -> dict[str, Any]:
     """Strict-ready schema for one-shot SOC 2 extraction.
@@ -25,6 +27,7 @@ def soc2_extraction_schema() -> dict[str, Any]:
             "opinion",
             "opinion_quote",
             "exceptions",
+            "controls_tested",
             "subservice_orgs",
             "cuecs",
             "notable_observations",
@@ -132,6 +135,42 @@ def soc2_extraction_schema() -> dict[str, Any]:
                     },
                 },
             },
+            "controls_tested": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "control_ref",
+                        "description",
+                        "result",
+                        "quote",
+                        "locator",
+                    ],
+                    "properties": {
+                        "control_ref": {
+                            "type": "string",
+                            "description": "Control reference, e.g. CC6.1-01.",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "What the control does.",
+                        },
+                        "result": {
+                            "type": "string",
+                            "enum": ["exception", "no_exception"],
+                        },
+                        "quote": {
+                            "type": "string",
+                            "description": "Verbatim result text, max 400 chars.",
+                        },
+                        "locator": {
+                            "type": "string",
+                            "description": "Section/page/control ref of the row.",
+                        },
+                    },
+                },
+            },
             "subservice_orgs": {
                 "type": "array",
                 "items": {
@@ -199,6 +238,53 @@ def soc2_extraction_schema() -> dict[str, Any]:
             "bridge_letter_provided": {
                 "type": "boolean",
                 "description": "True if a bridge letter covers the gap through the assessment date.",
+            },
+        },
+    }
+
+
+def interview_claims_schema() -> dict[str, Any]:
+    """Strict-ready schema for security-claim extraction (SPEC §4.3).
+
+    The model returns speaker, turn_index, verbatim text, and claim_type;
+    code adds claim_index and the turn's timestamp afterwards.
+    """
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["claims"],
+        "properties": {
+            "claims": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "speaker",
+                        "turn_index",
+                        "text",
+                        "claim_type",
+                    ],
+                    "properties": {
+                        "speaker": {
+                            "type": "string",
+                            "description": "Speaking target-side participant.",
+                        },
+                        "turn_index": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Index of the turn the claim is quoted from.",
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Verbatim claim text, max 500 chars.",
+                        },
+                        "claim_type": {
+                            "type": "string",
+                            "enum": claim_type_enum(),
+                        },
+                    },
+                },
             },
         },
     }

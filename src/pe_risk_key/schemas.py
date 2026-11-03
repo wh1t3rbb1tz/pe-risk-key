@@ -41,6 +41,12 @@ def strict_subschema(def_name: str) -> dict[str, Any]:
     return _strict_transform(subschema(def_name))
 
 
+def claim_type_enum() -> list[str]:
+    """Allowed claim types from the digest ``contradiction`` definition."""
+    claim = _load_root()["$defs"]["contradiction"]["properties"]["claim"]
+    return list(claim["properties"]["claim_type"]["enum"])
+
+
 def strip_nullable_optionals(obj: Any, def_name: str) -> Any:
     """Drop null-valued optional fields from strict-mode output.
 

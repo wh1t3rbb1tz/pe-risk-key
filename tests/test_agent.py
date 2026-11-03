@@ -881,3 +881,81 @@ def test_soc2_as_of_defaults_to_today(agent_env, monkeypatch, tmp_path):
     digest = _read_digest(result)
     expected_gap = (date.today() - date(2026, 3, 31)).days
     assert digest["soc2_analysis"]["bridge_gap_days"] == expected_gap
+
+
+def test_usage_breakdown_merges_orchestrator_and_soc2(
+    agent_env, monkeypatch, tmp_path
+):
+    result = _run_soc2_digest(agent_env, monkeypatch, tmp_path)
+    usage = result["usage"]
+    assert set(usage["components"]) == {
+        "orchestrator",
+        "document_analysis",
+    }
+    assert usage["prompt_tokens"] == 1200
+    assert usage["completion_tokens"] == 240
+    assert usage["cached_tokens"] == 0
+    assert usage["estimated_cost_usd"] == pytest.approx(0.0016 + 0.008)
+    assert usage["components"]["orchestrator"][
+        "estimated_cost_usd"
+    ] == pytest.approx(0.0016)
+    assert usage["components"]["document_analysis"][
+        "estimated_cost_usd"
+    ] == pytest.approx(0.008)
+    run_end = _read_trace(result)[-1]
+    assert run_end["type"] == "run_end"
+    assert run_end["usage"] == usage
+
+
+def test_usage_breakdown_orchestrator_only_without_soc2(
+    agent_env, monkeypatch
+):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {"content": "Submitting.", "tool_calls": [_submit(_finding())]},
+    ]
+    result = run_digest(DOMAIN, "Acme", "201-1000", "50M-250M")
+    assert set(result["usage"]["components"]) == {"orchestrator"}
+    assert result["usage"]["prompt_tokens"] == 200
+
+
+def test_merge_usage_breakdown_with_transcription_entry():
+    from pe_risk_key.agent.orchestrator import merge_usage_breakdown
+
+    merged = merge_usage_breakdown(
+        {
+            "orchestrator": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "cached_tokens": 0,
+                "estimated_cost_usd": 0.0008,
+            },
+            "transcription": {
+                "audio_hours": 0.0285,
+                "estimated_cost_usd": 0.00513,
+            },
+        }
+    )
+    assert merged["prompt_tokens"] == 100
+    assert merged["completion_tokens"] == 20
+    assert merged["cached_tokens"] == 0
+    assert merged["estimated_cost_usd"] == pytest.approx(0.00593)
+    assert merged["components"]["transcription"]["audio_hours"] == 0.0285

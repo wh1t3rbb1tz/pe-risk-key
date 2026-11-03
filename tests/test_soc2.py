@@ -608,20 +608,20 @@ def test_fixture_bold_spanning_quote_verifies(soc2_env):
 
 
 def test_ellipsis_quote_requires_ordered_segments():
-    from pe_risk_key.analyzers.soc2 import _normalize, _verify_quote
+    from pe_risk_key.analyzers.soc2 import normalize_quote, verify_quote
 
-    source = _normalize(
+    source = normalize_quote(
         "4 of 25 sampled admin accounts were not enforced for MFA. These "
         "were service-desk accounts created via a legacy provisioning "
         "script that bypassed the conditional access policy."
     )
-    ok, _ = _verify_quote(
+    ok, _ = verify_quote(
         "4 of 25 sampled admin accounts were not enforced for MFA. ... "
         "bypassed the conditional access policy.",
         source,
     )
     assert ok is not None
-    bad, diagnostics = _verify_quote(
+    bad, diagnostics = verify_quote(
         "bypassed the conditional access policy. ... "
         "4 of 25 sampled admin accounts",
         source,
@@ -655,14 +655,14 @@ def test_hyphenated_line_break_verifies(soc2_env, tmp_path):
 
 
 def test_normalize_typography_and_markup():
-    from pe_risk_key.analyzers.soc2 import _normalize
+    from pe_risk_key.analyzers.soc2 import normalize_quote
 
-    assert _normalize("**Bold** and `code` and _em_") == "bold and code and em"
-    assert _normalize("| a | b |") == "a b"
-    assert _normalize("“Hi” — it’s …") == '"hi" - it\'s ...'
-    assert _normalize("Nov 10–23, 2025") == "nov 10-23, 2025"
-    assert _normalize("exam-\nple") == "example"
-    assert _normalize("  Mixed\tCASE\n") == "mixed case"
+    assert normalize_quote("**Bold** and `code` and _em_") == "bold and code and em"
+    assert normalize_quote("| a | b |") == "a b"
+    assert normalize_quote("“Hi” — it’s …") == '"hi" - it\'s ...'
+    assert normalize_quote("Nov 10–23, 2025") == "nov 10-23, 2025"
+    assert normalize_quote("exam-\nple") == "example"
+    assert normalize_quote("  Mixed\tCASE\n") == "mixed case"
 
 
 def test_control_id_derived_from_ref(soc2_env):
@@ -787,3 +787,92 @@ def test_cc61_grounded_counts_kept(soc2_env):
     assert result.signals["exceptions"] == [
         {"control_id": "CC6.1", "control_ref": "CC6.1-01"}
     ]
+
+
+def _tested_row(control_ref, result, quote):
+    return {
+        "control_ref": control_ref,
+        "description": f"Description of {control_ref}.",
+        "result": result,
+        "quote": quote,
+        "locator": f"Section 4, {control_ref}",
+    }
+
+
+FIXTURE_TESTED_ROWS = [
+    _tested_row("CC6.1-01", "exception", FIXTURE_CC61),
+    _tested_row(
+        "CC6.2-01",
+        "exception",
+        "Exception noted. 3 of 15 terminated users retained active "
+        "access for 6, 11, and 19 business days respectively.",
+    ),
+    _tested_row("CC6.6-01", "no_exception", "No exceptions noted."),
+    _tested_row(
+        "CC7.2-01",
+        "exception",
+        "Exception noted. For 2 consecutive weeks (Nov 10-23, 2025), "
+        "alerts were forwarded to a decommissioned distribution list "
+        "and were not reviewed.",
+    ),
+    _tested_row(
+        "CC8.1-01",
+        "exception",
+        "Exception noted. 2 of 40 changes lacked documented approval "
+        "(emergency hotfixes).",
+    ),
+    _tested_row("CC9.2-01", "no_exception", "No exceptions noted."),
+    _tested_row("A1.2-01", "no_exception", "No exceptions noted."),
+    _tested_row(
+        "CC4.1-01",
+        "no_exception",
+        "No exceptions noted. 2 high-severity findings were reported "
+        "in the test; remediation status was outside the scope of "
+        "this control.",
+    ),
+    _tested_row("CC5.1-01", "no_exception", "Fabricated result text."),
+]
+
+
+def test_fixture_controls_tested_no_exception_in_pool(soc2_env):
+    client, _ = soc2_env
+    extraction = _fixture_extraction()
+    extraction["controls_tested"] = FIXTURE_TESTED_ROWS
+    client.extraction = extraction
+    result = analyze_soc2(FIXTURE, "doc_bw", AS_OF)
+    clean = [
+        item
+        for item in result.controls_tested
+        if item["result"] == "no_exception"
+    ]
+    assert [item["control_ref"] for item in clean] == [
+        "CC6.6-01",
+        "CC9.2-01",
+        "A1.2-01",
+        "CC4.1-01",
+    ]
+    assert [item["criterion"] for item in clean] == [
+        "CC6.6",
+        "CC9.2",
+        "A1.2",
+        "CC4.1",
+    ]
+    excerpts = {
+        item["excerpt"]: item
+        for item in result.evidence_pool
+        if item.get("collector") == "soc2_analyzer"
+    }
+    assert "No exceptions noted." in excerpts
+    assert (
+        "No exceptions noted. 2 high-severity findings were reported "
+        "in the test; remediation status was outside the scope of "
+        "this control."
+    ) in excerpts
+    assert all(
+        item["source_type"] == "document" for item in excerpts.values()
+    )
+    assert "Fabricated result text." not in excerpts
+    assert any(
+        drop["type"] == "tested_control" and drop["ref"] == "CC5.1-01"
+        for drop in result.dropped_unquoted
+    )

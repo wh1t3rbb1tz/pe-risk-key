@@ -102,8 +102,22 @@ def print_soc2_summary(digest: dict) -> None:
 
 
 def print_usage(usage: dict) -> None:
+    print("\ncost by component:")
+    for name, component in usage.get("components", {}).items():
+        if "audio_hours" in component:
+            detail = f"audio={component['audio_hours']:.2f}h"
+        else:
+            detail = (
+                f"input={component.get('prompt_tokens', 0)} "
+                f"output={component.get('completion_tokens', 0)} "
+                f"cached={component.get('cached_tokens', 0)}"
+            )
+        print(
+            f"  {name}: {detail} "
+            f"cost=${component.get('estimated_cost_usd', 0):.4f}"
+        )
     print(
-        f"\ntokens: input={usage['prompt_tokens']} "
+        f"tokens: input={usage['prompt_tokens']} "
         f"output={usage['completion_tokens']} cached={usage['cached_tokens']}"
     )
     print(f"estimated cost: ${usage['estimated_cost_usd']:.4f}")

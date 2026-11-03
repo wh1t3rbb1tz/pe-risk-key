@@ -571,3 +571,11 @@ def test_responses_search_sends_web_search_tool(monkeypatch):
     assert captured["instructions"] == "rules"
     assert client.total_usage["prompt_tokens"] == 30
     assert client.total_usage["completion_tokens"] == 7
+
+
+def test_transcription_cost_per_audio_hour():
+    from pe_risk_key.providers import estimate_transcription_cost_usd
+
+    assert estimate_transcription_cost_usd(3600) == 0.18
+    assert estimate_transcription_cost_usd(102.6) == 0.00513
+    assert estimate_transcription_cost_usd(0) == 0.0

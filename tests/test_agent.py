@@ -165,6 +165,50 @@ def _read_trace(result):
     ]
 
 
+def _run_named_digest(agent_env, monkeypatch, domain, company):
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": name, "arguments": {}}
+                for name in [
+                    "check_email_auth",
+                    "check_dnssec",
+                    "enumerate_ct_subdomains",
+                    "check_web_posture",
+                    "match_known_exploited",
+                    "search_public_incidents",
+                ]
+            ],
+        },
+        {"content": "Submitting.", "tool_calls": [_submit()]},
+    ]
+    return run_digest(domain, company, "201-1000", "50M-250M")
+
+
+def test_fixture_company_name_overrides_input(
+    agent_env, monkeypatch, capsys
+):
+    result = _run_named_digest(
+        agent_env, monkeypatch, DOMAIN, "Some Other Name"
+    )
+    assert (
+        _read_digest(result)["target"]["name"]
+        == "Brightwater Fleet Systems, Inc."
+    )
+    note = capsys.readouterr().out
+    assert "Brightwater Fleet Systems, Inc." in note
+    assert "Some Other Name" in note
+
+
+def test_company_name_kept_without_fixture(agent_env, monkeypatch, capsys):
+    result = _run_named_digest(
+        agent_env, monkeypatch, "unfixtured.example", "Kept Name"
+    )
+    assert _read_digest(result)["target"]["name"] == "Kept Name"
+    assert "fixture company name" not in capsys.readouterr().out
+
+
 def test_system_prompt_has_loop_rules():
     text = system_prompt()
     for phrase in (
@@ -423,7 +467,7 @@ def test_incidents_receives_forced_company_and_aliases(
     )
     assert captured["search_public_incidents"] == {
         "domain": DOMAIN,
-        "company_name": "Acme",
+        "company_name": "Brightwater Fleet Systems, Inc.",
         "aliases": ["Acme Corp"],
     }
 
@@ -1427,7 +1471,7 @@ def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
     memo = (Path(result["trace_path"]).parent / "ic_memo.md").read_text(
         encoding="utf-8"
     )
-    assert "# IC Memo: Acme" in memo
+    assert "# IC Memo: Brightwater Fleet Systems, Inc." in memo
     assert "(F-001," in memo
     assert "### Closing condition" in memo
     trace = _read_trace(result)
@@ -1485,6 +1529,27 @@ def test_preview_final_events_and_narrative_attempts(
     assert complete["attempts"] == 1
     assert complete["duration_ms"] >= 0
     assert "first_attempt_errors" not in complete
+
+
+def test_narrative_repaired_traced_without_regeneration(
+    agent_env, monkeypatch
+):
+    output = _narrative_output()
+    output["deal_recommendations"][0]["text"] = (
+        "Require the fix in Days 31-60 [F-001], consistent with the "
+        "proceed decision."
+    )
+    result = _run_narrative_digest(agent_env, monkeypatch, [output])
+    trace = _read_trace(result)
+    (repaired,) = [
+        event for event in trace if event["type"] == "narrative_repaired"
+    ]
+    assert any("trailing deal-signal" in fix for fix in repaired["repairs"])
+    (complete,) = [
+        event for event in trace if event["type"] == "narrative_complete"
+    ]
+    assert complete["attempts"] == 1
+    assert complete["valid"] is True
 
 
 def test_narrative_second_attempt_reports_first_errors(

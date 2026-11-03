@@ -161,9 +161,68 @@ def test_fixture_not_mutated_across_tests():
     assert copy.deepcopy(first) == _valid_digest()
 
 
-def test_contradiction_pool_only_ref_needs_pool():
+def test_contradiction_pool_only_ref_needs_supporting_evidence():
     digest = _valid_digest()
     digest["contradictions"][0]["evidence_refs"] = ["E-004"]
     assert validate_digest(digest) != []
-    pool = [{"evidence_id": "E-004"}]
-    assert validate_digest(digest, evidence_pool=pool) == []
+    digest["supporting_evidence"] = [
+        {
+            "evidence_id": "E-004",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "locator": "Section 4",
+            "excerpt": "No exceptions noted.",
+        }
+    ]
+    assert validate_digest(digest) == []
+
+
+def test_pool_only_citation_copied_and_validates():
+    from pe_risk_key.agent.orchestrator import supporting_evidence
+
+    digest = _valid_digest()
+    digest["contradictions"][0]["evidence_refs"] = ["E-001", "E-004"]
+    pool = [
+        {
+            "evidence_id": "E-001",
+            "source_type": "outside_in",
+            "collection_method": "dns_query",
+            "locator": "_dmarc TXT",
+            "excerpt": "no record",
+        },
+        {
+            "evidence_id": "E-004",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "locator": "Section 4, CC4.1-01",
+            "excerpt": "No exceptions noted.",
+        },
+    ]
+    copied = supporting_evidence(
+        digest["findings"],
+        digest["contradictions"],
+        digest["deal_recommendations"],
+        pool,
+    )
+    assert [item["evidence_id"] for item in copied] == ["E-004"]
+    digest["supporting_evidence"] = copied
+    assert validate_digest(digest) == []
+    assert digest["supporting_evidence"][0]["excerpt"] == (
+        "No exceptions noted."
+    )
+
+
+def test_deal_basis_accepts_supporting_evidence_ref():
+    digest = _valid_digest()
+    digest["deal_recommendations"][0]["basis_ids"] = ["E-004"]
+    assert validate_digest(digest) != []
+    digest["supporting_evidence"] = [
+        {
+            "evidence_id": "E-004",
+            "source_type": "document",
+            "collection_method": "document_upload",
+            "locator": "Section 4",
+            "excerpt": "No exceptions noted.",
+        }
+    ]
+    assert validate_digest(digest) == []

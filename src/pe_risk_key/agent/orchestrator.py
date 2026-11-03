@@ -479,6 +479,44 @@ def _run_interview(
     return transcript, claims_result
 
 
+def supporting_evidence(
+    findings: list[dict],
+    contradictions: list[dict[str, Any]] | None,
+    deal_recommendations: list[dict[str, Any]] | None,
+    evidence_pool: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Pool items cited by contradictions/recs that no finding embeds.
+
+    Pool order is preserved so output is deterministic.
+    """
+    if not evidence_pool:
+        return []
+    embedded: set[str] = set()
+    for finding in findings:
+        for item in finding.get("evidence", []) or []:
+            if isinstance(item, dict) and isinstance(
+                item.get("evidence_id"), str
+            ):
+                embedded.add(item["evidence_id"])
+    wanted: set[str] = set()
+    for contradiction in contradictions or []:
+        for ref in contradiction.get("evidence_refs", []) or []:
+            if isinstance(ref, str) and ref.startswith("E-"):
+                wanted.add(ref)
+    for rec in deal_recommendations or []:
+        for ref in rec.get("basis_ids", []) or []:
+            if isinstance(ref, str) and ref.startswith("E-"):
+                wanted.add(ref)
+    return [
+        item
+        for item in evidence_pool
+        if isinstance(item, dict)
+        and isinstance(item.get("evidence_id"), str)
+        and item["evidence_id"] in wanted
+        and item["evidence_id"] not in embedded
+    ]
+
+
 def _assemble_digest(
     *,
     digest_id: str,
@@ -502,6 +540,7 @@ def _assemble_digest(
     deal_recommendations: list[dict[str, Any]] | None = None,
     transcript_cached: bool = False,
     include_narrative_provider: bool = True,
+    evidence_pool: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -616,7 +655,27 @@ def _assemble_digest(
     }
     if soc2_analysis is not None:
         digest["soc2_analysis"] = soc2_analysis
+    digest["supporting_evidence"] = supporting_evidence(
+        findings, contradictions, deal_recommendations, evidence_pool
+    )
     return digest
+
+
+def _fixture_company_name(domain: str) -> str | None:
+    """Canonical company name from the outside-in fixture, if any."""
+    if not domain or "/" in domain or "\\" in domain or ".." in domain:
+        return None
+    path = ROOT / "fixtures" / "outside_in" / f"{domain}.json"
+    if not path.exists():
+        return None
+    try:
+        target = json.loads(path.read_text(encoding="utf-8")).get(
+            "target", {}
+        )
+    except (json.JSONDecodeError, OSError):
+        return None
+    name = target.get("name")
+    return name if isinstance(name, str) and name else None
 
 
 def run_digest(
@@ -649,7 +708,19 @@ def run_digest(
     ``evidence_pool.json``, ``claims.json`` (interview runs),
     ``digest.json``, and ``ic_memo.md`` under ``eval/runs/<digest_id>/``.
     The final step drafts the IC narrative from the scored digest.
+
+    The target name always comes from
+    ``fixtures/outside_in/<domain>.json`` when that fixture exists,
+    overriding the passed company name (a one-line note is printed
+    when they differ).
     """
+    fixture_name = _fixture_company_name(domain)
+    if fixture_name is not None and fixture_name != company_name:
+        print(
+            f"Note: using fixture company name {fixture_name!r} for "
+            f"{domain} (overrode {company_name!r})."
+        )
+        company_name = fixture_name
     alias_list = list(aliases or [])
     if digest_id is None:
         digest_id = new_digest_id()
@@ -1038,6 +1109,7 @@ def run_digest(
         transcript_cached=bool(
             interview_data is not None and interview_data[0].get("cached")
         ),
+        evidence_pool=evidence_pool,
     )
     ctx.trace.event(
         "digest_preview",
@@ -1093,6 +1165,11 @@ def run_digest(
     narrative_duration_ms = round(
         (time.monotonic() - narrative_started) * 1000, 1
     )
+    if narrative_result.get("narrative_repairs"):
+        ctx.trace.event(
+            "narrative_repaired",
+            repairs=narrative_result["narrative_repairs"],
+        )
     attempts = 2 if narrative_result["regenerated"] else 1
     ctx.trace.event(
         "narrative_complete",
@@ -1117,7 +1194,7 @@ def run_digest(
         narrative=narrative_result["narrative"],
         deal_recommendations=narrative_result["deal_recommendations"],
     )
-    digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
+    digest_errors = validate_digest(digest)
     (run_dir / "digest.json").write_text(
         json.dumps(digest, indent=2), encoding="utf-8"
     )

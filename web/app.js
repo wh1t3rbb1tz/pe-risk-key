@@ -111,6 +111,8 @@ let adjustments = [];
 let previewDigest = null;
 let costByDigest = {};
 let statusByDigest = {};
+let narrativeValidByDigest = {};
+let runNarrativeValid = null;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -263,6 +265,7 @@ async function loadRuns(autoselect) {
   const body = await api("/api/digests");
   costByDigest = {};
   statusByDigest = {};
+  narrativeValidByDigest = {};
   const picker = $("run-picker");
   picker
     .querySelectorAll('option:not([value=""])')
@@ -273,6 +276,7 @@ async function loadRuns(autoselect) {
   for (const entry of body.digests || []) {
     costByDigest[entry.digest_id] = entry.cost;
     statusByDigest[entry.digest_id] = entry.status;
+    narrativeValidByDigest[entry.digest_id] = entry.narrative_valid;
     if (entry.complete && entry.authoritative) {
       mainCount += 1;
       const option = el("option");
@@ -291,6 +295,9 @@ async function loadRuns(autoselect) {
         fmtDateTime(entry.generated_at);
       if (entry.complete && entry.superseded_by) {
         label += " · superseded by " + entry.superseded_by;
+      }
+      if (entry.complete && entry.schema_valid === false) {
+        label += " · invalid";
       }
       button.textContent = label;
       button.addEventListener("click", () => {
@@ -322,6 +329,7 @@ async function loadRuns(autoselect) {
 async function openRun(id) {
   resetRun();
   runId = id;
+  runNarrativeValid = narrativeValidByDigest[id] ?? null;
   $("run-picker").value = id;
   $("empty-state").hidden = true;
   $("content").hidden = false;
@@ -460,6 +468,7 @@ function resetRun() {
     eventSource.close();
     eventSource = null;
   }
+  runNarrativeValid = null;
   if (verdictTimer) {
     clearInterval(verdictTimer);
     verdictTimer = null;
@@ -745,6 +754,7 @@ function handleEvent(event) {
   } else if (type === "narrative_complete") {
     addTokens(event.usage);
     addCost(event.cost_usd);
+    runNarrativeValid = event.valid;
     let meta =
       fmtDuration(event.duration_ms) +
       " · " +
@@ -1189,6 +1199,11 @@ function indexDigest(digest) {
       };
     }
   }
+  for (const evidence of digest.supporting_evidence || []) {
+    if (evidence.evidence_id && !evidenceById[evidence.evidence_id]) {
+      evidenceById[evidence.evidence_id] = { ...evidence, finding_id: null };
+    }
+  }
 }
 
 function confidenceBasis(digest) {
@@ -1315,6 +1330,15 @@ function renderFinal(digest) {
   const summaryBody = el("p");
   appendCitedText(summaryBody, narrative.executive_summary || "");
   $("summary-body").replaceChildren(summaryBody);
+  if (runNarrativeValid === false) {
+    const warning = el(
+      "div",
+      "warning",
+      "Warning: narrative validation failed — prose may contain " +
+        "errors. See the trace for details."
+    );
+    $("summary-body").prepend(warning);
+  }
   const hasInterview = (digest.inputs?.interviews || []).length > 0;
   $("claims-panel").hidden = false;
   $("claims-note").hidden = hasInterview;

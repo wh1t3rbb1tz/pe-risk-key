@@ -8,7 +8,9 @@ import pytest
 import pe_risk_key.engine.narrative as narrative_module
 from pe_risk_key.engine.narrative import (
     generate_narrative,
+    needs_regeneration,
     render_ic_memo,
+    repair_narrative,
     validate_narrative,
 )
 
@@ -445,6 +447,123 @@ def test_short_evidence_length_limits():
     assert any("max 2" in error for error in errors)
     errors = validate_narrative(overcited, **full)
     assert not any("max 2" in error for error in errors)
+
+
+def _repairable_output():
+    output = _good_output()
+    output["executive_summary"] = output["executive_summary"].replace(
+        "72.5", "72.50"
+    )
+    output["deal_recommendations"][0]["text"] = (
+        "Require the fix in Days 31-60 [F-001], consistent with the "
+        "escalate decision."
+    )
+    output["deal_recommendations"].append(
+        {
+            "type": "price_adjustment",
+            "text": (
+                "No adjustment is warranted under "
+                "proceed_with_conditions."
+            ),
+            "basis_ids": ["F-001"],
+        }
+    )
+    return output
+
+
+def test_repair_rounds_scores():
+    fixed, repairs = repair_narrative(
+        _repairable_output(), max_chars=600, short=True, deal_label="Go"
+    )
+    assert "72.5" in fixed["executive_summary"]
+    assert "72.50" not in fixed["executive_summary"]
+    assert any("rounded 72.50" in repair for repair in repairs)
+
+
+def test_repair_replaces_tokens_with_labels():
+    fixed, repairs = repair_narrative(
+        _repairable_output(), max_chars=600, short=True, deal_label="Go"
+    )
+    text = fixed["deal_recommendations"][1]["text"]
+    assert text == "No adjustment is warranted under Proceed with conditions."
+    output = _good_output()
+    output["executive_summary"] += " Triggers CAP-CRIT in PR."
+    fixed, _ = repair_narrative(
+        output, max_chars=1200, short=False, deal_label="Go"
+    )
+    assert "CAP-CRIT" not in fixed["executive_summary"]
+    assert "a critical, potentially exploitable exposure" in fixed[
+        "executive_summary"
+    ]
+    assert "in Protect." in fixed["executive_summary"]
+
+
+def test_repair_strips_trailing_signal_clause():
+    fixed, repairs = repair_narrative(
+        _repairable_output(),
+        max_chars=600,
+        short=True,
+        deal_label="Escalate: full cyber diligence required before signing",
+    )
+    assert fixed["deal_recommendations"][0]["text"] == (
+        "Require the fix in Days 31-60 [F-001]."
+    )
+    assert any("trailing deal-signal" in repair for repair in repairs)
+    kept, kept_repairs = repair_narrative(
+        _good_output(), max_chars=600, short=True, deal_label="Proceed"
+    )
+    assert (
+        kept["deal_recommendations"][0]["text"]
+        == "Require DMARC enforcement before close."
+    )
+    assert kept_repairs == []
+
+
+def test_repair_trims_and_dedupes():
+    output = _good_output()
+    output["executive_summary"] = (
+        "Bottom line: one [F-001] two [F-001] three [F-001] four "
+        "[F-001]. "
+        + "Padding sentence here. " * 40
+        + "Next steps: done [F-001]."
+    )
+    fixed, repairs = repair_narrative(
+        output, max_chars=600, short=True, deal_label="Go"
+    )
+    summary = fixed["executive_summary"]
+    assert len(summary) <= 600
+    assert summary.endswith(".")
+    assert summary.count("[F-001]") == 2
+    assert any("trimmed summary" in repair for repair in repairs)
+    assert any("duplicate citation" in repair for repair in repairs)
+    kept, repairs = repair_narrative(
+        output, max_chars=1200, short=False, deal_label="Go"
+    )
+    assert kept["executive_summary"].count("[F-001]") > 2
+    assert not any("duplicate citation" in repair for repair in repairs)
+
+
+def test_repaired_narrative_passes_without_regeneration(narrative_env):
+    narrative_env.outputs = [_repairable_output()]
+    narrative_env.calls = []
+    result = generate_narrative(_payload())
+    assert result["valid"] is True
+    assert result["regenerated"] is False
+    assert len(narrative_env.calls) == 1
+    assert result["narrative_repairs"] != []
+
+
+def test_unmapped_leak_skips_regeneration(narrative_env):
+    output = _good_output()
+    output["executive_summary"] += " See foo_bar for details."
+    narrative_env.outputs = [output]
+    narrative_env.calls = []
+    result = generate_narrative(_payload())
+    assert result["valid"] is False
+    assert result["regenerated"] is False
+    assert len(narrative_env.calls) == 1
+    assert needs_regeneration(result["validation_errors"]) is False
+    assert needs_regeneration(["executive_summary has an uncited risk."])
 
 
 def test_speculation_phrasing_flagged():

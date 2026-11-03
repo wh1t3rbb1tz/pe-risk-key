@@ -150,11 +150,20 @@ def _contradiction(contradiction_id, refs):
     }
 
 
-def _write(runs_dir, digest):
+def _write(runs_dir, digest, narrative_valid=True):
     run_dir = runs_dir / digest["digest_id"]
     run_dir.mkdir()
     (run_dir / "digest.json").write_text(
         json.dumps(digest), encoding="utf-8"
+    )
+    (run_dir / "trace.jsonl").write_text(
+        json.dumps(
+            {"seq": 1, "type": "narrative_complete", "valid": narrative_valid}
+        )
+        + "\n"
+        + json.dumps({"seq": 2, "type": "run_end", "usage": {}})
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -187,6 +196,8 @@ def test_list_digests_complete_only(runs_dir):
                 "documents": [],
                 "interviews": [],
             },
+            "schema_valid": True,
+            "narrative_valid": True,
         }
     ]
 

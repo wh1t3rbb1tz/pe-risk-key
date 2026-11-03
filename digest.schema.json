@@ -304,6 +304,13 @@
         "$ref": "#/$defs/contradiction"
       }
     },
+    "supporting_evidence": {
+      "description": "Evidence-pool items cited by contradictions or deal recommendations that live in no finding's evidence, copied here so the digest is self-contained.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
     "soc2_analysis": {
       "$ref": "#/$defs/soc2_analysis"
     },
@@ -403,7 +410,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^(F|C)-[0-9]{3}$"
+              "pattern": "^(F|C|E)-[0-9]{3}$"
             },
             "minItems": 1
           }

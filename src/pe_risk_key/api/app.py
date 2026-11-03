@@ -100,12 +100,27 @@ def _read_events(run_dir: Path) -> list[dict[str, Any]]:
     return events
 
 
-def _run_cost(run_dir: Path) -> float | None:
-    for event in reversed(_read_events(run_dir)):
+def _trace_status(run_dir: Path) -> tuple[bool, float | None, bool | None]:
+    """(has_run_end, cost, narrative_valid) from trace.jsonl.
+
+    narrative_valid is None when the run never reached narrative_complete.
+    """
+    has_end = False
+    cost: float | None = None
+    narrative_valid: bool | None = None
+    for event in _read_events(run_dir):
         if event.get("type") == "run_end":
-            cost = event.get("usage", {}).get("estimated_cost_usd")
-            return cost if isinstance(cost, (int, float)) else None
-    return None
+            has_end = True
+            value = event.get("usage", {}).get("estimated_cost_usd")
+            if isinstance(value, (int, float)):
+                cost = value
+        elif event.get("type") == "narrative_complete":
+            narrative_valid = event.get("valid")
+    return has_end, cost, narrative_valid
+
+
+def _run_cost(run_dir: Path) -> float | None:
+    return _trace_status(run_dir)[1]
 
 
 def _run_target(run_dir: Path) -> dict[str, Any]:
@@ -266,7 +281,7 @@ def _mark_authoritative(runs: list[dict[str, Any]]) -> None:
     """
     by_domain: dict[str, list[dict[str, Any]]] = {}
     for run in runs:
-        if not run["complete"]:
+        if not (run["complete"] and run["schema_valid"]):
             continue
         domain = (run.get("target") or {}).get("domain")
         if domain:
@@ -284,7 +299,11 @@ def _mark_authoritative(runs: list[dict[str, Any]]) -> None:
 
 @app.get("/api/digests")
 def list_digests() -> dict[str, list[dict[str, Any]]]:
-    """Runs from eval/runs/, newest first, with digest state."""
+    """Runs from eval/runs/, newest first, with digest state.
+
+    A run is complete when it has digest.json, a run_end event, and a
+    narrative; narrative_valid is reported separately as a warning.
+    """
     runs: list[dict[str, Any]] = []
     seen: set[str] = set()
     dirs = (
@@ -310,8 +329,9 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
             inputs = digest.get("inputs", {})
             schema_valid = not validate_digest(digest)
             summary = digest.get("narrative", {}).get("executive_summary")
+            has_run_end, _, narrative_valid = _trace_status(run_dir)
             complete = (
-                schema_valid
+                has_run_end
                 and bool(summary)
                 and summary != NARRATIVE_PENDING
             )
@@ -331,6 +351,7 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "cost": _run_cost(run_dir),
                     "complete": complete,
                     "schema_valid": schema_valid,
+                    "narrative_valid": narrative_valid,
                     "has_soc2": has_soc2,
                     "has_interview": has_interview,
                     "input_count": (1 if inputs.get("domain_scan") else 0)
@@ -356,6 +377,7 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "cost": None,
                     "complete": False,
                     "schema_valid": False,
+                    "narrative_valid": None,
                     "has_soc2": False,
                     "has_interview": False,
                     "input_count": 0,
@@ -387,6 +409,7 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                 "cost": None,
                 "complete": False,
                 "schema_valid": False,
+                "narrative_valid": None,
                 "has_soc2": False,
                 "has_interview": False,
                 "input_count": 0,

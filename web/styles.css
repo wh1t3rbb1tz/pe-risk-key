@@ -338,4 +338,8 @@ table.mini td { border-bottom: 1px solid var(--line); padding: 5px 8px; vertical
 #export-wrap { text-align: right; }
 #export-memo { color: var(--accent); }
 .memo-writing { color: var(--muted); font-size: 13px; }
+.warning {
+  color: var(--medium); border: 1px solid var(--medium); border-radius: 4px;
+  padding: 8px 12px; margin-bottom: 10px; font-size: 13px;
+}
 .memo-writing .timer { font-family: var(--mono); }

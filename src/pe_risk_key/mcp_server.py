@@ -59,6 +59,21 @@ def _complete_entries() -> list[dict[str, Any]]:
     return [entry for entry in entries if entry.get("complete")]
 
 
+def _trace_narrative_valid(digest_id: str) -> bool | None:
+    path = api_app.RUNS_DIR / digest_id / "trace.jsonl"
+    if not path.exists():
+        return None
+    valid: bool | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "narrative_complete":
+            valid = event.get("valid")
+    return valid
+
+
 def _resolve_entry(
     entries: list[dict[str, Any]],
     domain: str | None,
@@ -92,9 +107,10 @@ def list_digests(
     fuller assessment of the same target.
 
     Each entry has the digest id, target company, rating (A best,
-    F worst), the plain-language deal decision, the run date, and the
-    inputs behind it. Use this to find which targets have been
-    assessed, then call get_risk_digest for detail.
+    F worst), the plain-language deal decision, the run date, the
+    inputs behind it, and schema/narrative validity flags. Use this
+    to find which targets have been assessed, then call
+    get_risk_digest for detail.
     """
     shown = [
         entry
@@ -112,6 +128,8 @@ def list_digests(
                 "decision": entry["decision"],
                 "date": (entry.get("generated_at") or "")[:10],
                 "inputs": digest.get("inputs", {}),
+                "schema_valid": entry.get("schema_valid"),
+                "narrative_valid": entry.get("narrative_valid"),
             }
         )
     return result
@@ -204,6 +222,8 @@ def get_risk_digest(
         ).get("executive_summary"),
         "inputs": digest.get("inputs", {}),
         "superseded_runs": superseded_runs,
+        "schema_valid": entry.get("schema_valid"),
+        "narrative_valid": _trace_narrative_valid(entry["digest_id"]),
     }
 
 
@@ -215,7 +235,9 @@ def explain_finding(digest_id: str, finding_id: str) -> dict[str, Any]:
     Returns the finding's title, severity, confidence, and deal impact;
     each evidence item with its locator and collection method; the
     remediation plan with triage cost and effort; and any management
-    claim verdicts that cite this finding's evidence.
+    claim verdicts that cite this finding's evidence, each with its
+    cited evidence resolved to excerpts (including supporting
+    evidence that lives in no finding).
     """
     digest = _read_digest(digest_id)
     finding = next(
@@ -232,6 +254,30 @@ def explain_finding(digest_id: str, finding_id: str) -> dict[str, Any]:
     evidence_ids = {
         item.get("evidence_id") for item in finding.get("evidence", [])
     }
+    by_evidence_id: dict[str, dict[str, Any]] = {}
+    for item in digest.get("findings", []):
+        for evidence in item.get("evidence", []) or []:
+            by_evidence_id[evidence.get("evidence_id")] = evidence
+    for evidence in digest.get("supporting_evidence", []) or []:
+        by_evidence_id.setdefault(
+            evidence.get("evidence_id"), evidence
+        )
+    by_finding_id = {
+        item.get("finding_id"): item
+        for item in digest.get("findings", [])
+    }
+
+    def _resolve(ref: str) -> dict[str, Any]:
+        if ref.startswith("F-"):
+            target = by_finding_id.get(ref, {})
+            return {"ref": ref, "title": target.get("title")}
+        target = by_evidence_id.get(ref, {})
+        return {
+            "ref": ref,
+            "excerpt": target.get("excerpt"),
+            "locator": target.get("locator"),
+        }
+
     citing = []
     for contradiction in digest.get("contradictions", []):
         refs = set(contradiction.get("evidence_refs", []))
@@ -247,6 +293,10 @@ def explain_finding(digest_id: str, finding_id: str) -> dict[str, Any]:
                         contradiction.get("claim") or {}
                     ).get("text"),
                     "explanation": contradiction.get("explanation"),
+                    "evidence": [
+                        _resolve(ref)
+                        for ref in contradiction.get("evidence_refs", [])
+                    ],
                 }
             )
     return {

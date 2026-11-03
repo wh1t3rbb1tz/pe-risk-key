@@ -27,6 +27,13 @@ def _write(runs_dir, digest_id, digest):
     (run_dir / "digest.json").write_text(
         json.dumps(digest), encoding="utf-8"
     )
+    (run_dir / "trace.jsonl").write_text(
+        json.dumps({"seq": 1, "type": "narrative_complete", "valid": True})
+        + "\n"
+        + json.dumps({"seq": 2, "type": "run_end", "usage": {}})
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_audit_lists_and_archives(monkeypatch, tmp_path, capsys):

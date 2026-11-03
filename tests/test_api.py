@@ -377,11 +377,20 @@ def _complete_digest(digest_id, generated_at, summary="Bottom line: fine."):
     }
 
 
-def _write_digest(api_env, digest_id, digest):
+def _write_digest(api_env, digest_id, digest, narrative_valid=True):
     run_dir = api_env / "runs" / digest_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "digest.json").write_text(
         json.dumps(digest), encoding="utf-8"
+    )
+    (run_dir / "trace.jsonl").write_text(
+        json.dumps(
+            {"seq": 1, "type": "narrative_complete", "valid": narrative_valid}
+        )
+        + "\n"
+        + json.dumps({"seq": 2, "type": "run_end", "usage": {}})
+        + "\n",
+        encoding="utf-8",
     )
 
 
@@ -428,18 +437,27 @@ def test_list_complete_and_schema_flags(client, api_env):
         "dg_000000000007",
         {"digest_id": "dg_000000000007", "generated_at": "2026-01-01T00:00:00+00:00"},
     )
+    _write_digest(
+        api_env,
+        "dg_000000000008",
+        _complete_digest("dg_000000000008", "2026-04-01T00:00:00+00:00"),
+        narrative_valid=False,
+    )
     entries = {
         entry["digest_id"]: entry
         for entry in client.get("/api/digests").json()["digests"]
     }
     assert entries["dg_000000000005"]["complete"] is True
     assert entries["dg_000000000005"]["schema_valid"] is True
+    assert entries["dg_000000000005"]["narrative_valid"] is True
     assert entries["dg_000000000005"]["has_soc2"] is True
     assert entries["dg_000000000005"]["has_interview"] is True
     assert entries["dg_000000000006"]["complete"] is False
     assert entries["dg_000000000006"]["schema_valid"] is True
     assert entries["dg_000000000007"]["complete"] is False
     assert entries["dg_000000000007"]["schema_valid"] is False
+    assert entries["dg_000000000008"]["complete"] is True
+    assert entries["dg_000000000008"]["narrative_valid"] is False
 
 
 def _slim_digest(digest_id, generated_at):
@@ -468,6 +486,11 @@ def test_list_marks_authoritative_run(client, api_env):
         "dg_000000000003",
         _slim_digest("dg_000000000003", "2026-03-01T00:00:00+00:00"),
     )
+    broken = _complete_digest(
+        "dg_000000000009", "2026-04-01T00:00:00+00:00"
+    )
+    broken["findings"] = [{"finding_id": "F-1"}]
+    _write_digest(api_env, "dg_000000000009", broken)
     entries = {
         entry["digest_id"]: entry
         for entry in client.get("/api/digests").json()["digests"]
@@ -482,6 +505,10 @@ def test_list_marks_authoritative_run(client, api_env):
     assert (
         entries["dg_000000000003"]["superseded_by"] == "dg_000000000002"
     )
+    assert entries["dg_000000000009"]["complete"] is True
+    assert entries["dg_000000000009"]["schema_valid"] is False
+    assert entries["dg_000000000009"]["authoritative"] is False
+    assert entries["dg_000000000009"]["superseded_by"] is None
 
 
 def test_resolve_runs_dir_env_override(monkeypatch, tmp_path):

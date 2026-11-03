@@ -8,6 +8,7 @@ regenerating once on failure.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from typing import Any
@@ -110,6 +111,23 @@ _CAP_ID_RE = re.compile(r"\bCAP-[A-Z0-9-]+\b")
 _SNAKE_RE = re.compile(r"\b[A-Za-z0-9]+_[A-Za-z0-9_]+\b")
 _SPECULATION_RE = re.compile(r"\b(if present|may contain)\b", re.IGNORECASE)
 _SOC_TWO_RE = re.compile(r"soc 2", re.IGNORECASE)
+_SIGNAL_LEADIN_RE = re.compile(
+    r"\b(consistent with|in line with|supporting|aligned with|"
+    r"reflecting|in keeping with)\b",
+    re.IGNORECASE,
+)
+_REPAIR_TOKEN_LABELS = {
+    **DEAL_SIGNAL_LABELS,
+    **WINDOW_LABELS,
+    **DEAL_TYPE_LABELS,
+    **CLAIM_TYPE_LABELS,
+}
+_MECHANICAL_ERROR_MARKERS = (
+    "with 2+ decimals",
+    "leaks ",
+    "chars (max",
+    "max 2 for a short evidence base",
+)
 _FUNCTION_CODE_RE = re.compile(
     r"\b(GV|PR|DE|RS|RC)\b|\b(GV|ID|PR|DE|RS|RC)\.[A-Z]{2,3}\b"
 )
@@ -714,6 +732,151 @@ def validate_narrative(
     return errors
 
 
+def repair_narrative(
+    output: Any,
+    *,
+    max_chars: int,
+    short: bool,
+    deal_label: str,
+) -> tuple[Any, list[str]]:
+    """Deterministic fixes for mechanical narrative violations.
+
+    Rounds over-precise scores, replaces enum/snake_case tokens via the
+    label maps, strips trailing clauses that restate the deal signal,
+    trims the summary at a sentence boundary, and drops duplicate
+    citations beyond two per id (short evidence only). Returns the
+    fixed output plus a human-readable list of repairs applied.
+    """
+    fixed = copy.deepcopy(output)
+    repairs: list[str] = []
+    if not isinstance(fixed, dict):
+        return fixed, repairs
+    keywords = {
+        word
+        for word in re.findall(r"[a-z]+", (deal_label or "").lower())
+        if len(word) >= 4
+    }
+
+    def detokenize(text: Any) -> Any:
+        if not isinstance(text, str):
+            return text
+
+        def cap(match: re.Match) -> str:
+            token = match.group(0)
+            if token in CAP_LABELS:
+                repairs.append(
+                    f"replaced {token} with {CAP_LABELS[token]!r}"
+                )
+                return CAP_LABELS[token]
+            return token
+
+        text = _CAP_ID_RE.sub(cap, text)
+
+        def func(match: re.Match) -> str:
+            token = match.group(0)
+            base = token.split(".")[0]
+            if base in FUNCTION_NAMES:
+                repairs.append(
+                    f"replaced {token} with {FUNCTION_NAMES[base]!r}"
+                )
+                return FUNCTION_NAMES[base]
+            return token
+
+        text = _FUNCTION_CODE_RE.sub(func, text)
+
+        def snake(match: re.Match) -> str:
+            token = match.group(0)
+            if token in _REPAIR_TOKEN_LABELS:
+                repairs.append(
+                    f"replaced {token} with "
+                    f"{_REPAIR_TOKEN_LABELS[token]!r}"
+                )
+                return _REPAIR_TOKEN_LABELS[token]
+            return token
+
+        return _SNAKE_RE.sub(snake, text)
+
+    summary = fixed.get("executive_summary")
+    if isinstance(summary, str):
+        summary = detokenize(summary)
+
+        def rounded(match: re.Match) -> str:
+            new = f"{float(match.group(0)):.1f}"
+            if new != match.group(0):
+                repairs.append(f"rounded {match.group(0)} to {new}")
+            return new
+
+        summary = _OVER_PRECISE_RE.sub(rounded, summary)
+        if len(summary) > max_chars:
+            kept: list[str] = []
+            total = 0
+            for sentence in _split_sentences(summary):
+                extra = len(sentence) + (1 if kept else 0)
+                if total + extra > max_chars:
+                    break
+                kept.append(sentence)
+                total += extra
+            trimmed = (
+                " ".join(kept) if kept else summary[:max_chars].rstrip()
+            )
+            repairs.append(
+                f"trimmed summary from {len(summary)} to {len(trimmed)} "
+                "chars"
+            )
+            summary = trimmed
+        if short:
+            seen: dict[str, int] = {}
+
+            def dedupe(match: re.Match) -> str:
+                ref = f"{match.group(1)}-{match.group(2)}"
+                seen[ref] = seen.get(ref, 0) + 1
+                if seen[ref] > 2:
+                    repairs.append(f"dropped duplicate citation of {ref}")
+                    return ""
+                return match.group(0)
+
+            summary = _CITE_RE.sub(dedupe, summary)
+            summary = re.sub(r" {2,}", " ", summary)
+        fixed["executive_summary"] = summary
+    questions = fixed.get("key_questions_for_management")
+    if isinstance(questions, list):
+        fixed["key_questions_for_management"] = [
+            detokenize(question) for question in questions
+        ]
+    recs = fixed.get("deal_recommendations")
+    if isinstance(recs, list):
+        for rec in recs:
+            if not isinstance(rec, dict):
+                continue
+            text = detokenize(rec.get("text"))
+            if isinstance(text, str) and keywords:
+                head, sep, tail = text.rstrip().rpartition(",")
+                lowered = tail.lower()
+                if (
+                    sep
+                    and _SIGNAL_LEADIN_RE.search(tail)
+                    and any(word in lowered for word in keywords)
+                ):
+                    head = head.rstrip()
+                    if not head.endswith((".", "?", "!")):
+                        head += "."
+                    repairs.append(
+                        "stripped trailing deal-signal clause "
+                        f"{tail.strip()!r}"
+                    )
+                    text = head
+            rec["text"] = text
+    return fixed, repairs
+
+
+def needs_regeneration(errors: list[str]) -> bool:
+    """True when any error is substantive (not a mechanical leftover)."""
+    return any(
+        not any(marker in error for marker in _MECHANICAL_ERROR_MARKERS)
+        for error in errors
+    )
+
+
 def generate_narrative(
     payload: dict[str, Any], mode: Mode = "standard"
 ) -> dict[str, Any]:
@@ -725,9 +888,9 @@ def generate_narrative(
     view (display
     labels instead of enums); numbers validate against that view.
     Returns ``{narrative, deal_recommendations, valid,
-    validation_errors, regenerated, first_attempt_errors, usage,
-    estimated_cost_usd}``. The narrative is sanitized for digest safety
-    even when invalid.
+    validation_errors, regenerated, first_attempt_errors,
+    narrative_repairs, usage, estimated_cost_usd}``. The narrative is
+    sanitized for digest safety even when invalid.
     """
     findings = payload.get("findings", [])
     contradictions = payload.get("contradictions", [])
@@ -812,20 +975,36 @@ def generate_narrative(
         reasoning_effort="medium",
     )
     add_trigger_basis(output)
-    errors = validate_narrative(
-        output,
-        finding_ids=finding_ids,
-        contradiction_ids=contradiction_ids,
-        input_numbers=input_numbers,
-        required_types=required_types,
-        trigger_findings=trigger_findings,
-        contradiction_verdicts=contradiction_verdicts,
-        has_interview=has_interview,
-        has_soc2=has_soc2,
+    deal_label = DEAL_SIGNAL_LABELS.get(
+        (payload.get("overall") or {}).get("deal_signal"), ""
     )
+    max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
+
+    def validate_fixed(candidate: Any) -> tuple[Any, list[str], list[str]]:
+        fixed, repairs = repair_narrative(
+            candidate, max_chars=max_chars, short=short, deal_label=deal_label
+        )
+        return (
+            fixed,
+            repairs,
+            validate_narrative(
+                fixed,
+                finding_ids=finding_ids,
+                contradiction_ids=contradiction_ids,
+                input_numbers=input_numbers,
+                required_types=required_types,
+                trigger_findings=trigger_findings,
+                contradiction_verdicts=contradiction_verdicts,
+                has_interview=has_interview,
+                has_soc2=has_soc2,
+            ),
+        )
+
+    output, repairs, errors = validate_fixed(output)
+    narrative_repairs = list(repairs)
     regenerated = False
     first_attempt_errors = list(errors)
-    if errors:
+    if errors and needs_regeneration(errors):
         regenerated = True
         messages = [
             *messages,
@@ -846,17 +1025,8 @@ def generate_narrative(
             reasoning_effort="medium",
         )
         add_trigger_basis(output)
-        errors = validate_narrative(
-            output,
-            finding_ids=finding_ids,
-            contradiction_ids=contradiction_ids,
-            input_numbers=input_numbers,
-            required_types=required_types,
-            trigger_findings=trigger_findings,
-            contradiction_verdicts=contradiction_verdicts,
-            has_interview=has_interview,
-            has_soc2=has_soc2,
-        )
+        output, repairs, errors = validate_fixed(output)
+        narrative_repairs.extend(repairs)
     valid = not errors
     summary = output.get("executive_summary", "")
     questions = output.get("key_questions_for_management", [])
@@ -906,6 +1076,7 @@ def generate_narrative(
         "validation_errors": errors,
         "regenerated": regenerated,
         "first_attempt_errors": first_attempt_errors,
+        "narrative_repairs": narrative_repairs,
         "usage": usage,
         "estimated_cost_usd": estimate_token_cost_usd(
             usage, WONDER_USD_PER_MTOK

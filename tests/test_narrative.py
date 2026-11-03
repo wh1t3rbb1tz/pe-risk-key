@@ -110,10 +110,11 @@ def _good_output():
             "Key risks: the score is 72.5. "
             "Management credibility: statements conflict "
             "with evidence [C-001]. "
-            "Next steps: proceed with conditions."
+            "Next steps: proceed with conditions; no SOC 2 report "
+            "was provided."
         ),
         "key_questions_for_management": [
-            f"Confirm control {index} status [F-001]?" for index in range(5)
+            f"Confirm control {index} status [F-001]?" for index in range(4)
         ],
         "deal_recommendations": [
             {
@@ -350,6 +351,123 @@ def test_trigger_table_yields_brightwater_types():
         "F-010",
         "F-001",
     ]
+
+
+def test_low_coverage_trigger_and_label():
+    from pe_risk_key.engine.narrative import (
+        CAP_LABELS,
+        required_recommendation_types,
+    )
+
+    assert (
+        CAP_LABELS["CAP-LOW-COVERAGE"]
+        == "limited evidence: outside-in signals only"
+    )
+    required = required_recommendation_types(
+        findings=[{"finding_id": "F-001", "rule_id": "SURFACE-RISKY-HOSTS"}],
+        caps_applied=["CAP-LOW-COVERAGE"],
+        remediation_plan={
+            "items": [
+                {
+                    "window": "days_61_100",
+                    "finding_ids": ["F-001"],
+                }
+            ],
+            "total_cost_low_usd": 10000,
+            "total_cost_high_usd": 50000,
+        },
+        revenue_midpoint_usd=30000000,
+        soc2_analysis=None,
+    )
+    assert any(
+        "SOC 2 Type II report" in guidance
+        for guidance in required["closing_condition"]["guidance"]
+    )
+
+
+def test_no_interview_credibility_sentence():
+    output = _good_output()
+    output["executive_summary"] = (
+        "Bottom line: rating C reflects one gap [F-001]. "
+        "Key risks: the score is 72.5. "
+        "Management credibility: Not assessed: no management "
+        "interview provided. "
+        "Next steps: proceed with conditions."
+    )
+    errors = validate_narrative(
+        output, has_interview=False, **_validate_ids()
+    )
+    assert errors == []
+    errors = validate_narrative(
+        _good_output(), has_interview=False, **_validate_ids()
+    )
+    assert any("must read exactly" in error for error in errors)
+
+
+def test_no_soc2_statement_required():
+    errors = validate_narrative(
+        _good_output(), has_soc2=False, **_validate_ids()
+    )
+    assert errors == []
+    output = _good_output()
+    output["executive_summary"] = output["executive_summary"].replace(
+        "; no SOC 2 report was provided", ""
+    )
+    errors = validate_narrative(
+        output, has_soc2=False, **_validate_ids()
+    )
+    assert any("no SOC 2" in error for error in errors)
+
+
+def test_short_evidence_length_limits():
+    long_summary = _good_output()
+    long_summary["executive_summary"] += " Extra detail here." * 60
+    errors = validate_narrative(long_summary, **_validate_ids())
+    assert any("max 600" in error for error in errors)
+    many_questions = _good_output()
+    many_questions["key_questions_for_management"].append(
+        "Confirm one more control [F-001]?"
+    )
+    errors = validate_narrative(many_questions, **_validate_ids())
+    assert any("need 3-4" in error for error in errors)
+    full = dict(_validate_ids())
+    full["finding_ids"] = {"F-001", "F-002", "F-003", "F-004"}
+    errors = validate_narrative(_good_output(), **full)
+    assert any("need 5-8" in error for error in errors)
+    overcited = _good_output()
+    overcited["executive_summary"] = (
+        "Bottom line: one [F-001] two [F-001]. "
+        "Key risks: three [F-001]. "
+        "Management credibility: ok. "
+        "Next steps: done."
+    )
+    errors = validate_narrative(overcited, **_validate_ids())
+    assert any("max 2" in error for error in errors)
+    errors = validate_narrative(overcited, **full)
+    assert not any("max 2" in error for error in errors)
+
+
+def test_speculation_phrasing_flagged():
+    output = _good_output()
+    output["executive_summary"] = (
+        "Bottom line: rating C [F-001]. Key risks: data may contain "
+        "secrets. Management credibility: ok [C-001]. "
+        "Next steps: none."
+    )
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("may contain" in error for error in errors)
+    output = _good_output()
+    output["key_questions_for_management"][0] = (
+        "Confirm the host is isolated if present [F-001]?"
+    )
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("if present" in error for error in errors)
+    output = _good_output()
+    output["deal_recommendations"][0]["text"] = (
+        "Require cleanup if present before close."
+    )
+    errors = validate_narrative(output, **_validate_ids())
+    assert any("if present" in error for error in errors)
 
 
 def test_plan_sorted_by_window_with_total():

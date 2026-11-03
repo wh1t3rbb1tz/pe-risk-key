@@ -1062,6 +1062,7 @@ def run_digest(
             "contradictions": contradictions,
             "remediation_plan": scored["remediation_plan"],
             "soc2_summary": soc2_summary,
+            "has_interview": interview_data is not None,
             "limitations": scored["limitations"],
             "required_recommendations": required_recommendation_types(
                 findings=merged,

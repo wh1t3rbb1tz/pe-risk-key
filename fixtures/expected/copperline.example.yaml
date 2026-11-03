@@ -1,0 +1,30 @@
+# Expected results for the Copperline fixture (outside-in only).
+# A quiet target: one medium risky-host finding, capped to B on coverage.
+
+target: copperline.example
+inputs:
+  outside_in: fixtures/outside_in/copperline.example.json
+  documents: []
+  interviews: []
+
+expected_findings:
+  - { rule_id: SURFACE-RISKY-HOSTS, severity: medium, source: outside_in }
+
+must_not_find:
+  - EMAIL-DMARC-NONE     # EMAIL-* clean
+  - EMAIL-DMARC-MISSING
+  - EMAIL-SPF-SOFT
+  - DNS-NO-DNSSEC        # DNSSEC enabled
+  - WEB-LEGACY-TLS       # WEB-* clean
+  - WEB-NO-HSTS
+  - WEB-CERT-EXPIRING
+  - KEV-POTENTIAL        # KEV-* clean
+  - KEV-PRODUCT-LISTED
+  - PUB-INCIDENT-RECENT  # no public incidents
+
+expected_outside_in_only:
+  caps: [CAP-LOW-COVERAGE]
+  rating: B
+  confidence: low
+  deal_signal: proceed_with_conditions
+  unassessed: [GV, DE, RC]

@@ -84,7 +84,10 @@ def test_known_findings_exact_scores():
     # (94×.15 + 54.2×.30 + 86.5×.10) / .55 = 70.927…
     assert out["overall"]["score"] == pytest.approx(70.92727272727273)
     assert out["overall"]["rating"] == "C"  # B capped by CAP-CRIT
-    assert out["overall"]["rating_caps_applied"] == ["CAP-CRIT"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-CRIT",
+        "CAP-LOW-COVERAGE",
+    ]
     assert out["overall"]["confidence"] == "low"
     assert out["overall"]["deal_signal"] == "proceed_with_conditions"
 
@@ -154,7 +157,10 @@ def test_cap_crit_fires():
         revenue_band="50M-250M",
     )
     assert out["overall"]["rating"] == "C"
-    assert out["overall"]["rating_caps_applied"] == ["CAP-CRIT"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-CRIT",
+        "CAP-LOW-COVERAGE",
+    ]
 
 
 def test_cap_crit_ignores_low_confidence():
@@ -164,7 +170,7 @@ def test_cap_crit_ignores_low_confidence():
         SCORING,
         revenue_band="50M-250M",
     )
-    assert out["overall"]["rating_caps_applied"] == []
+    assert out["overall"]["rating_caps_applied"] == ["CAP-LOW-COVERAGE"]
 
 
 def test_cap_soc2_qualified_fires():
@@ -173,7 +179,10 @@ def test_cap_soc2_qualified_fires():
     )
     assert out["overall"]["score"] == 100.0
     assert out["overall"]["rating"] == "C"
-    assert out["overall"]["rating_caps_applied"] == ["CAP-SOC2-QUAL"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-SOC2-QUAL",
+        "CAP-LOW-COVERAGE",
+    ]
 
 
 def test_cap_incident_fires_and_escalates():
@@ -191,7 +200,10 @@ def test_cap_incident_fires_and_escalates():
         SCORING,
         revenue_band="50M-250M",
     )
-    assert out["overall"]["rating_caps_applied"] == ["CAP-INCIDENT"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-INCIDENT",
+        "CAP-LOW-COVERAGE",
+    ]
     assert out["overall"]["deal_signal"] == "escalate_full_diligence"
 
 
@@ -202,7 +214,10 @@ def test_cap_contradiction_fires():
     ]
     out = score_digest([], contradictions, SCORING, revenue_band="50M-250M")
     assert out["overall"]["rating"] == "D"
-    assert out["overall"]["rating_caps_applied"] == ["CAP-CONTRADICTION"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-CONTRADICTION",
+        "CAP-LOW-COVERAGE",
+    ]
     assert out["overall"]["deal_signal"] == "escalate_full_diligence"
 
 
@@ -233,7 +248,7 @@ def test_deal_signal_reprice_beats_conditions():
         _finding("F-005", "medium", "high", "RS.MA", high=20000),
     ]
     out = score_digest(findings, [], SCORING, revenue_band="<10M")
-    assert out["overall"]["rating"] == "A"
+    assert out["overall"]["rating"] == "B"  # A capped by CAP-LOW-COVERAGE
     # 100k total high > 1% of the $5M midpoint.
     assert out["remediation_plan"]["total_cost_high_usd"] == 100000
     assert out["overall"]["deal_signal"] == "reprice_or_restructure"
@@ -245,20 +260,75 @@ def test_deal_signal_high_severity_at_rating_a():
         [],
         SCORING,
         revenue_band="50M-250M",
+        has_soc2=True,
     )
     assert out["overall"]["rating"] == "A"
     assert out["overall"]["deal_signal"] == "proceed_with_conditions"
 
 
 def test_deal_signal_clean_run_proceeds():
-    out = score_digest([], [], SCORING, revenue_band="50M-250M")
+    out = score_digest(
+        [], [], SCORING, revenue_band="50M-250M", has_soc2=True
+    )
     assert out["overall"] == {
         "score": 100.0,
         "rating": "A",
         "deal_signal": "proceed",
-        "confidence": "low",
+        "confidence": "medium",
         "rating_caps_applied": [],
     }
+
+
+def test_cap_low_coverage_fires_on_low_confidence():
+    out = score_digest([], [], SCORING, revenue_band="50M-250M")
+    assert out["overall"]["confidence"] == "low"
+    assert out["overall"]["rating"] == "B"
+    assert out["overall"]["rating_caps_applied"] == ["CAP-LOW-COVERAGE"]
+    assert out["overall"]["deal_signal"] == "proceed_with_conditions"
+
+
+def test_copperline_expected_profile():
+    expected = yaml.safe_load(
+        (
+            ROOT / "fixtures" / "expected" / "copperline.example.yaml"
+        ).read_text(encoding="utf-8")
+    )["expected_outside_in_only"]
+    out = score_digest(
+        [
+            _finding(
+                "F-001",
+                "medium",
+                "medium",
+                "ID.RA",
+                rule_id="SURFACE-RISKY-HOSTS",
+                low=10000,
+                high=50000,
+            )
+        ],
+        [],
+        SCORING,
+        revenue_band="10M-50M",
+    )
+    assert out["overall"]["rating"] == expected["rating"]
+    assert out["overall"]["rating_caps_applied"] == expected["caps"]
+    assert out["overall"]["confidence"] == expected["confidence"]
+    assert out["overall"]["deal_signal"] == expected["deal_signal"]
+    unassessed = [
+        entry["function"]
+        for entry in out["function_scores"]
+        if not entry["assessed"]
+    ]
+    assert unassessed == expected["unassessed"]
+
+
+def test_cap_low_coverage_absent_with_medium_confidence():
+    out = score_digest(
+        [], [], SCORING, revenue_band="50M-250M", has_interview=True
+    )
+    assert out["overall"]["confidence"] == "medium"
+    assert out["overall"]["rating"] == "A"
+    assert out["overall"]["rating_caps_applied"] == []
+    assert out["overall"]["deal_signal"] == "proceed"
 
 
 def test_rating_bands_and_floor():
@@ -431,11 +501,14 @@ def test_cap_contradiction_fires_with_two_highs():
         _contradiction("contradicted", "high"),
     ]
     out = score_digest([], contradictions, SCORING, revenue_band="50M-250M")
-    assert out["overall"]["rating_caps_applied"] == ["CAP-CONTRADICTION"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-CONTRADICTION",
+        "CAP-LOW-COVERAGE",
+    ]
     out = score_digest(
         [],
         [_contradiction("contradicted", "high")],
         SCORING,
         revenue_band="50M-250M",
     )
-    assert out["overall"]["rating_caps_applied"] == []
+    assert out["overall"]["rating_caps_applied"] == ["CAP-LOW-COVERAGE"]

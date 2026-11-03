@@ -148,8 +148,9 @@ def rating_for_score(score: float, scoring_config: dict[str, Any]) -> str:
 
 # --- Rating caps -------------------------------------------------------------
 # One explicit predicate per cap id in scoring.yaml. Each takes a context
-# dict {findings, contradictions, soc2_opinion} and returns True when the
-# cap fires. The YAML `when` strings document the same condition.
+# dict {findings, contradictions, soc2_opinion, confidence} and returns
+# True when the cap fires. The YAML `when` strings document the same
+# condition.
 
 CapContext = dict[str, Any]
 
@@ -187,11 +188,17 @@ def cap_contradictions(ctx: CapContext) -> bool:
     return count >= 2
 
 
+def cap_low_coverage(ctx: CapContext) -> bool:
+    """CAP-LOW-COVERAGE: low confidence caps the rating at B."""
+    return ctx.get("confidence") == "low"
+
+
 CAP_IMPLEMENTATIONS: dict[str, Callable[[CapContext], bool]] = {
     "CAP-CRIT": cap_critical_findings,
     "CAP-SOC2-QUAL": cap_soc2_qualified,
     "CAP-INCIDENT": cap_incident,
     "CAP-CONTRADICTION": cap_contradictions,
+    "CAP-LOW-COVERAGE": cap_low_coverage,
 }
 
 
@@ -228,6 +235,7 @@ def deal_signal(
     revenue_band: str,
     scoring_config: dict[str, Any],
     findings: list[dict[str, Any]],
+    confidence: str,
 ) -> str:
     """First matching deal_signal_rule wins (YAML order)."""
     midpoint = scoring_config["revenue_midpoint_usd"][revenue_band]
@@ -236,6 +244,8 @@ def deal_signal(
     if total_cost_high_usd > 0.01 * midpoint:
         return "reprice_or_restructure"
     if rating == "C" or any(f["severity"] == "high" for f in findings):
+        return "proceed_with_conditions"
+    if confidence == "low":
         return "proceed_with_conditions"
     return "proceed"
 
@@ -324,10 +334,16 @@ def score_digest(
     )
     score = weighted_score(function_scores, scoring_config, assessed)
     rating = rating_for_score(score, scoring_config)
+    confidence = confidence_level(
+        domain_scan=domain_scan,
+        has_soc2=has_soc2,
+        has_interview=has_interview,
+    )
     ctx: CapContext = {
         "findings": findings,
         "contradictions": contradictions,
         "soc2_opinion": soc2_opinion,
+        "confidence": confidence,
     }
     rating, caps_applied = apply_rating_caps(rating, ctx, scoring_config)
     plan = remediation_plan(findings)
@@ -341,12 +357,9 @@ def score_digest(
             revenue_band=revenue_band,
             scoring_config=scoring_config,
             findings=findings,
+            confidence=confidence,
         ),
-        "confidence": confidence_level(
-            domain_scan=domain_scan,
-            has_soc2=has_soc2,
-            has_interview=has_interview,
-        ),
+        "confidence": confidence,
         "rating_caps_applied": caps_applied,
     }
     return {

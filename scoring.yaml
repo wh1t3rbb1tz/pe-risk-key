@@ -81,6 +81,9 @@ rating_caps:
   - id: CAP-CONTRADICTION
     when: "count(contradictions where verdict == contradicted and severity in [critical, high]) >= 2"
     max_rating: D
+  - id: CAP-LOW-COVERAGE
+    when: "confidence == low"
+    max_rating: B
 
 # --- Confidence --------------------------------------------------------------
 confidence:
@@ -97,6 +100,8 @@ deal_signal_rules:
     when: "remediation total_cost_high_usd > 0.01 * revenue_midpoint_usd"
   - signal: proceed_with_conditions
     when: "rating == C or any finding severity == high"
+  - signal: proceed_with_conditions
+    when: "confidence == low"
   - signal: proceed
     when: "true"
 

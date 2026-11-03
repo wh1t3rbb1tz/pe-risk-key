@@ -497,9 +497,9 @@ def test_assembled_brightwater_digest_validates(agent_env, monkeypatch):
     assert digest["deal_recommendations"] == []
     assert digest["narrative"] == _CANNED_NARRATIVE["narrative"]
     assert digest["trace_ref"] == result["trace_path"]
-    assert digest["overall"]["rating"] == "A"
+    assert digest["overall"]["rating"] == "B"
     assert digest["overall"]["deal_signal"] == "proceed_with_conditions"
-    assert digest["overall"]["rating_caps_applied"] == []
+    assert digest["overall"]["rating_caps_applied"] == ["CAP-LOW-COVERAGE"]
     assert digest["overall"]["confidence"] == "low"
     by_function = {e["function"]: e for e in digest["function_scores"]}
     assert by_function["PR"]["score"] == 79.0
@@ -1389,14 +1389,15 @@ def _run_narrative_digest(agent_env, monkeypatch, outputs):
 def _narrative_output():
     return {
         "executive_summary": (
-            "Bottom line: rating A with no material gap [F-001]. "
+            "Bottom line: rating B with no material gap [F-001]. "
             "Key risks: one low finding. "
-            "Management credibility: nothing to assess. "
-            "Next steps: proceed."
+            "Management credibility: Not assessed: no management "
+            "interview provided. "
+            "Next steps: proceed; no SOC 2 report was provided."
         ),
         "key_questions_for_management": [
             f"Question {index} about controls [F-001]?"
-            for index in range(5)
+            for index in range(4)
         ],
         "deal_recommendations": [
             {
@@ -1420,7 +1421,7 @@ def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
     digest = _read_digest(result)
     assert validate_digest(digest) == []
     assert digest["narrative"]["executive_summary"].startswith("Bottom line:")
-    assert len(digest["narrative"]["key_questions_for_management"]) == 5
+    assert len(digest["narrative"]["key_questions_for_management"]) == 4
     assert digest["deal_recommendations"][0]["type"] == "closing_condition"
     assert "narrative" in [p["role"] for p in digest["mode"]["providers"]]
     memo = (Path(result["trace_path"]).parent / "ic_memo.md").read_text(

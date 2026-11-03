@@ -453,7 +453,7 @@ def test_cap_contradiction_evaluated_on_merged_list(crosscheck_env):
     )
     assert len(merged) == 1
     out = score_digest([], merged, scoring, revenue_band="50M-250M")
-    assert out["overall"]["rating_caps_applied"] == []
+    assert out["overall"]["rating_caps_applied"] == ["CAP-LOW-COVERAGE"]
     split = [
         dict(_claim(0, "Frag one."), turn_index=0),
         dict(_claim(1, "Frag two."), turn_index=4),
@@ -466,4 +466,7 @@ def test_cap_contradiction_evaluated_on_merged_list(crosscheck_env):
     merged, _ = merge_contradictions(result["contradictions"], split, FINDINGS)
     assert len(merged) == 2
     out = score_digest([], merged, scoring, revenue_band="50M-250M")
-    assert out["overall"]["rating_caps_applied"] == ["CAP-CONTRADICTION"]
+    assert out["overall"]["rating_caps_applied"] == [
+        "CAP-CONTRADICTION",
+        "CAP-LOW-COVERAGE",
+    ]

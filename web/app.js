@@ -12,6 +12,7 @@ const CAP_LABELS = {
   "CAP-INCIDENT": "a publicly disclosed incident within 24 months",
   "CAP-CONTRADICTION": "multiple management statements contradicted by evidence",
   "CAP-SOC2-QUAL": "a qualified SOC 2 opinion",
+  "CAP-LOW-COVERAGE": "limited evidence: outside-in signals only",
 };
 const WINDOW_ORDER = ["days_0_30", "days_31_60", "days_61_100", "post_100"];
 const WINDOW_LABELS = {

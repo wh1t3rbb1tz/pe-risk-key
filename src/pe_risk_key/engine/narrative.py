@@ -29,6 +29,11 @@ SYSTEM_PROMPT = """You write the investment-committee narrative for a cyber-risk
 6. Write plain IC prose: no enum strings, cap ids, control codes, or evidence locators. Cite [F-xxx]/[C-xxx] instead."""
 
 MAX_SUMMARY_CHARS = 1200
+MAX_SHORT_SUMMARY_CHARS = 600
+SHORT_EVIDENCE_FINDINGS = 3
+SHORT_QUESTION_RANGE = (3, 4)
+FULL_QUESTION_RANGE = (5, 8)
+NO_INTERVIEW_CREDIBILITY = "Not assessed: no management interview provided."
 
 RISK_KEYWORDS = (
     "exception",
@@ -59,6 +64,7 @@ CAP_LABELS = {
     "CAP-INCIDENT": "a publicly disclosed incident within 24 months",
     "CAP-CONTRADICTION": "multiple management statements contradicted by evidence",
     "CAP-SOC2-QUAL": "a qualified SOC 2 opinion",
+    "CAP-LOW-COVERAGE": "limited evidence: outside-in signals only",
 }
 
 WINDOW_LABELS = {
@@ -101,6 +107,8 @@ _NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
 _OVER_PRECISE_RE = re.compile(r"\d+\.\d{2,}")
 _CAP_ID_RE = re.compile(r"\bCAP-[A-Z0-9-]+\b")
 _SNAKE_RE = re.compile(r"\b[A-Za-z0-9]+_[A-Za-z0-9_]+\b")
+_SPECULATION_RE = re.compile(r"\b(if present|may contain)\b", re.IGNORECASE)
+_SOC_TWO_RE = re.compile(r"soc 2", re.IGNORECASE)
 _FUNCTION_CODE_RE = re.compile(
     r"\b(GV|PR|DE|RS|RC)\b|\b(GV|ID|PR|DE|RS|RC)\.[A-Z]{2,3}\b"
 )
@@ -418,6 +426,12 @@ def required_recommendation_types(
             "independent validation of management representations",
         )
         add("closing_condition", "bring-down of security reps")
+    if "CAP-LOW-COVERAGE" in caps_applied:
+        add(
+            "closing_condition",
+            "obtain the current SOC 2 Type II report and a management "
+            "security interview before relying on this rating",
+        )
     soc2_exceptions = (
         soc2_analysis.get("exceptions", []) if soc2_analysis else []
     )
@@ -482,6 +496,23 @@ def _leak_errors(label: str, text: str) -> list[str]:
     return leaks
 
 
+def _section_text(summary: str, section: str) -> str:
+    """Text of one labeled summary paragraph (label excluded)."""
+    lowered = summary.lower()
+    start = lowered.find(section)
+    if start < 0:
+        return ""
+    start += len(section)
+    ends = [
+        lowered.find(other, start)
+        for other in SUMMARY_SECTIONS
+        if other != section
+    ]
+    ends = [position for position in ends if position >= 0]
+    end = min(ends) if ends else len(summary)
+    return summary[start:end].strip()
+
+
 def validate_narrative(
     output: Any,
     *,
@@ -491,20 +522,26 @@ def validate_narrative(
     required_types: set[str] | None = None,
     trigger_findings: dict[str, list[str]] | None = None,
     contradiction_verdicts: dict[str, str] | None = None,
+    has_interview: bool = True,
+    has_soc2: bool = True,
+    finding_count: int | None = None,
 ) -> list[str]:
     """Human-readable validation errors; empty means valid."""
     errors: list[str] = []
     if not isinstance(output, dict):
         return ["narrative output is not an object."]
+    count = len(finding_ids) if finding_count is None else finding_count
+    short = count <= SHORT_EVIDENCE_FINDINGS
+    max_chars = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
     summary = output.get("executive_summary")
     if not isinstance(summary, str):
         errors.append("executive_summary is not a string.")
         summary = ""
     else:
-        if len(summary) > MAX_SUMMARY_CHARS:
+        if len(summary) > max_chars:
             errors.append(
                 f"executive_summary is {len(summary)} chars "
-                f"(max {MAX_SUMMARY_CHARS})."
+                f"(max {max_chars})."
             )
         lowered = summary.lower()
         for section in SUMMARY_SECTIONS:
@@ -512,14 +549,43 @@ def validate_narrative(
                 errors.append(
                     f"executive_summary is missing {section!r} section."
                 )
+        if not has_interview:
+            credibility = _section_text(summary, "management credibility:")
+            if credibility != NO_INTERVIEW_CREDIBILITY:
+                errors.append(
+                    "management credibility must read exactly "
+                    f"{NO_INTERVIEW_CREDIBILITY!r} when no interview was "
+                    "provided."
+                )
+        if not has_soc2:
+            coverage = _section_text(
+                summary, "key risks:"
+            ) + _section_text(summary, "next steps:")
+            if "soc 2" not in coverage.lower():
+                errors.append(
+                    "state in key risks or next steps that no SOC 2 "
+                    "report was provided."
+                )
+        if short:
+            cites: dict[str, int] = {}
+            for kind, number in _CITE_RE.findall(summary):
+                ref = f"{kind}-{number}"
+                cites[ref] = cites.get(ref, 0) + 1
+            for ref in sorted(cites):
+                if cites[ref] > 2:
+                    errors.append(
+                        f"executive_summary cites {ref} {cites[ref]} "
+                        "times (max 2 for a short evidence base)."
+                    )
     questions = output.get("key_questions_for_management")
+    question_range = SHORT_QUESTION_RANGE if short else FULL_QUESTION_RANGE
     if not isinstance(questions, list):
         errors.append("key_questions_for_management is not a list.")
         questions = []
-    elif not 5 <= len(questions) <= 8:
+    elif not question_range[0] <= len(questions) <= question_range[1]:
         errors.append(
             f"key_questions_for_management has {len(questions)} entries "
-            "(need 5-8)."
+            f"(need {question_range[0]}-{question_range[1]})."
         )
     recs = output.get("deal_recommendations")
     if not isinstance(recs, list):
@@ -531,6 +597,13 @@ def validate_narrative(
             errors.append(f"{label} is not a string.")
             return
         errors.extend(_leak_errors(label, text))
+        for phrase in sorted(
+            {match.group(0).lower() for match in _SPECULATION_RE.finditer(text)}
+        ):
+            errors.append(
+                f"{label} speculates ({phrase!r}); state what is known "
+                "and what to verify."
+            )
         if require_citation and not _CITE_RE.search(text):
             errors.append(
                 f"{label} is not tied to any finding or contradiction."
@@ -627,7 +700,8 @@ def validate_narrative(
         if ref in finding_ids or ref in contradiction_ids:
             continue
         errors.append(f"cited id {ref} does not exist in this digest.")
-    for token in sorted(_number_tokens(summary) - input_numbers):
+    summary_quantities = _SOC_TWO_RE.sub("", summary)
+    for token in sorted(_number_tokens(summary_quantities) - input_numbers):
         errors.append(
             f"executive_summary states number {token} not in the input."
         )
@@ -645,8 +719,9 @@ def generate_narrative(
     """Draft, validate, and (once) regenerate the IC narrative.
 
     ``payload`` carries target, overall, function_scores, findings,
-    contradictions, remediation_plan, soc2_summary, limitations, and
-    required_recommendations. The model sees a labeled view (display
+    contradictions, remediation_plan, soc2_summary, has_interview,
+    limitations, and required_recommendations. The model sees a labeled
+    view (display
     labels instead of enums); numbers validate against that view.
     Returns ``{narrative, deal_recommendations, valid,
     validation_errors, regenerated, first_attempt_errors, usage,
@@ -696,9 +771,37 @@ def generate_narrative(
 
     labeled = _label_payload(payload)
     input_numbers = _number_tokens(json.dumps(labeled))
+    has_interview = payload.get("has_interview", True)
+    has_soc2 = payload.get("soc2_summary", True) is not None
+    short = len(finding_ids) <= SHORT_EVIDENCE_FINDINGS
+    extra_rules = [
+        "Do not speculate about conditions not in the evidence "
+        '("if present", "may contain"); state what is known and what '
+        "to verify.",
+    ]
+    if not has_interview:
+        extra_rules.append(
+            "The Management credibility paragraph must read exactly: "
+            f'"{NO_INTERVIEW_CREDIBILITY}"'
+        )
+    if not has_soc2:
+        extra_rules.append(
+            "State in Key risks or Next steps that no SOC 2 report was "
+            "provided."
+        )
+    if short:
+        extra_rules.append(
+            "Short evidence base: keep executive_summary to 600 "
+            "characters or fewer, ask 3 to 4 questions, and cite no "
+            "finding more than twice in the summary."
+        )
+    system_prompt = SYSTEM_PROMPT + "".join(
+        f"\n{index}. {rule}"
+        for index, rule in enumerate(extra_rules, start=7)
+    )
     client = ModelClient(role="narrative", mode=mode)
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": json.dumps(labeled, indent=2)},
     ]
     output = client.chat_json(
@@ -716,6 +819,8 @@ def generate_narrative(
         required_types=required_types,
         trigger_findings=trigger_findings,
         contradiction_verdicts=contradiction_verdicts,
+        has_interview=has_interview,
+        has_soc2=has_soc2,
     )
     regenerated = False
     first_attempt_errors = list(errors)
@@ -748,6 +853,8 @@ def generate_narrative(
             required_types=required_types,
             trigger_findings=trigger_findings,
             contradiction_verdicts=contradiction_verdicts,
+            has_interview=has_interview,
+            has_soc2=has_soc2,
         )
     valid = not errors
     summary = output.get("executive_summary", "")
@@ -783,9 +890,10 @@ def generate_narrative(
             }
     recs = list(merged_recs.values())
     usage = dict(client.total_usage)
+    summary_cap = MAX_SHORT_SUMMARY_CHARS if short else MAX_SUMMARY_CHARS
     return {
         "narrative": {
-            "executive_summary": summary[:MAX_SUMMARY_CHARS]
+            "executive_summary": summary[:summary_cap]
             if isinstance(summary, str)
             else "",
             "key_questions_for_management": [

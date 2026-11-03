@@ -442,6 +442,64 @@ def test_list_complete_and_schema_flags(client, api_env):
     assert entries["dg_000000000007"]["schema_valid"] is False
 
 
+def _slim_digest(digest_id, generated_at):
+    digest = _complete_digest(digest_id, generated_at)
+    digest["inputs"] = {
+        "domain_scan": True,
+        "documents": [],
+        "interviews": [],
+    }
+    return digest
+
+
+def test_list_marks_authoritative_run(client, api_env):
+    _write_digest(
+        api_env,
+        "dg_000000000001",
+        _complete_digest("dg_000000000001", "2026-01-01T00:00:00+00:00"),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000002",
+        _complete_digest("dg_000000000002", "2026-02-01T00:00:00+00:00"),
+    )
+    _write_digest(
+        api_env,
+        "dg_000000000003",
+        _slim_digest("dg_000000000003", "2026-03-01T00:00:00+00:00"),
+    )
+    entries = {
+        entry["digest_id"]: entry
+        for entry in client.get("/api/digests").json()["digests"]
+    }
+    assert entries["dg_000000000002"]["authoritative"] is True
+    assert entries["dg_000000000002"]["superseded_by"] is None
+    assert entries["dg_000000000001"]["authoritative"] is False
+    assert (
+        entries["dg_000000000001"]["superseded_by"] == "dg_000000000002"
+    )
+    assert entries["dg_000000000003"]["authoritative"] is False
+    assert (
+        entries["dg_000000000003"]["superseded_by"] == "dg_000000000002"
+    )
+
+
+def test_resolve_runs_dir_env_override(monkeypatch, tmp_path):
+    from pe_risk_key.agent.orchestrator import (
+        resolve_runs_dir as orch_resolve,
+    )
+    from pe_risk_key.api.app import resolve_runs_dir as api_resolve
+
+    monkeypatch.setenv("PE_RISK_KEY_RUNS_DIR", str(tmp_path))
+    assert api_resolve() == tmp_path
+    assert orch_resolve() == tmp_path
+    monkeypatch.delenv("PE_RISK_KEY_RUNS_DIR")
+    assert (
+        api_resolve()
+        == Path(api.__file__).resolve().parents[3] / "eval" / "runs"
+    )
+
+
 def test_digest_memo_trace_endpoints(client, api_env):
     run_dir = _run_dir(api_env)
     (run_dir / "digest.json").write_text(

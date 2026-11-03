@@ -269,12 +269,12 @@ async function loadRuns(autoselect) {
     .forEach((o) => o.remove());
   const older = $("older-list");
   older.replaceChildren();
-  let completeCount = 0;
+  let mainCount = 0;
   for (const entry of body.digests || []) {
     costByDigest[entry.digest_id] = entry.cost;
     statusByDigest[entry.digest_id] = entry.status;
-    if (entry.complete) {
-      completeCount += 1;
+    if (entry.complete && entry.authoritative) {
+      mainCount += 1;
       const option = el("option");
       option.value = entry.digest_id;
       option.textContent = runLabel(entry);
@@ -283,12 +283,16 @@ async function loadRuns(autoselect) {
       const button = el("button", "older-run");
       button.type = "button";
       const target = entry.target || {};
-      button.textContent =
+      let label =
         (target.name || target.domain || entry.digest_id) +
         " · " +
         (entry.rating || entry.status) +
         " · " +
         fmtDateTime(entry.generated_at);
+      if (entry.complete && entry.superseded_by) {
+        label += " · superseded by " + entry.superseded_by;
+      }
+      button.textContent = label;
       button.addEventListener("click", () => {
         $("older-runs").open = false;
         openRun(entry.digest_id).catch((err) => displayError(err));
@@ -297,16 +301,18 @@ async function loadRuns(autoselect) {
       older.appendChild(button);
     }
   }
-  const olderCount = (body.digests || []).length - completeCount;
+  const olderCount = (body.digests || []).length - mainCount;
   $("older-runs").hidden = olderCount === 0;
   $("older-summary").textContent =
-    "Older / incomplete runs (" + olderCount + ")";
+    "Older / superseded / incomplete runs (" + olderCount + ")";
   if (runId) {
     const stillThere = [...picker.options].some((o) => o.value === runId);
     picker.value = stillThere ? runId : "";
   }
   if (autoselect) {
-    const newest = (body.digests || []).find((entry) => entry.complete);
+    const newest = (body.digests || []).find(
+      (entry) => entry.complete && entry.authoritative
+    );
     if (newest) {
       await openRun(newest.digest_id).catch((err) => displayError(err));
     }

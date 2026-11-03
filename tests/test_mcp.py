@@ -31,6 +31,8 @@ def _digest(
     summary="Bottom line: ok.",
     findings=None,
     contradictions=None,
+    documents=None,
+    interviews=None,
 ):
     return {
         "schema_version": "1.0.0",
@@ -52,7 +54,11 @@ def _digest(
                 }
             ],
         },
-        "inputs": {"domain_scan": True, "documents": [], "interviews": []},
+        "inputs": {
+            "domain_scan": True,
+            "documents": documents or [],
+            "interviews": interviews or [],
+        },
         "overall": {
             "score": score,
             "rating": rating,
@@ -110,6 +116,24 @@ def _finding(finding_id="F-001", severity="high", evidence_id="E-001"):
     }
 
 
+def _doc():
+    return {
+        "doc_id": "doc_soc2x",
+        "type": "soc2_type2",
+        "filename": "soc2.md",
+        "sha256": "ab" * 32,
+    }
+
+
+def _interview():
+    return {
+        "interview_id": "int_iv01",
+        "filename": "iv.wav",
+        "sha256": "cd" * 32,
+        "duration_seconds": 60,
+    }
+
+
 def _contradiction(contradiction_id, refs):
     return {
         "contradiction_id": contradiction_id,
@@ -158,7 +182,42 @@ def test_list_digests_complete_only(runs_dir):
             "rating": "C",
             "decision": "Proceed",
             "date": "2026-03-01",
+            "inputs": {
+                "domain_scan": True,
+                "documents": [],
+                "interviews": [],
+            },
         }
+    ]
+
+
+def test_domain_resolves_to_authoritative_run(runs_dir):
+    _write(
+        runs_dir,
+        _digest(
+            "dg_000000000001", "Acme", "acme.example",
+            "2026-01-01T00:00:00+00:00", rating="D", score=40.0,
+            documents=[_doc()], interviews=[_interview()],
+        ),
+    )
+    _write(
+        runs_dir,
+        _digest(
+            "dg_000000000002", "Acme", "acme.example",
+            "2026-05-01T00:00:00+00:00", rating="B", score=82.5,
+        ),
+    )
+    digest = get_risk_digest(domain="acme.example")
+    assert digest["digest_id"] == "dg_000000000001"
+    assert digest["inputs"]["documents"] != []
+    assert digest["inputs"]["interviews"] != []
+    assert digest["superseded_runs"] == 1
+    assert [entry["digest_id"] for entry in list_digests()] == [
+        "dg_000000000001"
+    ]
+    assert [entry["digest_id"] for entry in list_digests(True)] == [
+        "dg_000000000002",
+        "dg_000000000001",
     ]
 
 

@@ -59,64 +59,92 @@ def _complete_entries() -> list[dict[str, Any]]:
     return [entry for entry in entries if entry.get("complete")]
 
 
-def _latest_for(
+def _resolve_entry(
     entries: list[dict[str, Any]],
     domain: str | None,
     digest_id: str | None,
 ) -> dict[str, Any]:
-    matching = [
+    if digest_id is not None:
+        for entry in entries:
+            if entry["digest_id"] == digest_id:
+                return entry
+        raise ValueError(f"No complete digest {digest_id!r}.")
+    group = [
         entry
         for entry in entries
-        if (digest_id is not None and entry["digest_id"] == digest_id)
-        or (
-            domain is not None
-            and (entry.get("target") or {}).get("domain") == domain
-        )
+        if (entry.get("target") or {}).get("domain") == domain
     ]
-    if not matching:
-        want = digest_id or domain
-        raise ValueError(f"No complete digest for {want!r}.")
-    return max(matching, key=lambda e: e.get("generated_at") or "")
+    if not group:
+        raise ValueError(f"No complete digest for {domain!r}.")
+    for entry in group:
+        if entry.get("authoritative"):
+            return entry
+    return max(group, key=lambda e: e.get("generated_at") or "")
 
 
 @server.tool()
-def list_digests() -> list[dict[str, Any]]:
-    """List finished risk digests, newest first.
+def list_digests(
+    include_superseded: bool = False,
+) -> list[dict[str, Any]]:
+    """List finished risk digests, newest first — one authoritative run
+    per target (most inputs wins, then newest). Pass
+    include_superseded=true to also list older runs superseded by a
+    fuller assessment of the same target.
 
     Each entry has the digest id, target company, rating (A best,
-    F worst), the plain-language deal decision, and the run date.
-    Use this to find which targets have been assessed, then call
-    get_risk_digest for detail.
+    F worst), the plain-language deal decision, the run date, and the
+    inputs behind it. Use this to find which targets have been
+    assessed, then call get_risk_digest for detail.
     """
-    return [
-        {
-            "digest_id": entry["digest_id"],
-            "company": (entry.get("target") or {}).get("name"),
-            "rating": entry["rating"],
-            "decision": entry["decision"],
-            "date": (entry.get("generated_at") or "")[:10],
-        }
+    shown = [
+        entry
         for entry in _complete_entries()
+        if include_superseded or entry.get("authoritative")
     ]
+    result = []
+    for entry in shown:
+        digest = _read_digest(entry["digest_id"])
+        result.append(
+            {
+                "digest_id": entry["digest_id"],
+                "company": (entry.get("target") or {}).get("name"),
+                "rating": entry["rating"],
+                "decision": entry["decision"],
+                "date": (entry.get("generated_at") or "")[:10],
+                "inputs": digest.get("inputs", {}),
+            }
+        )
+    return result
 
 
 @server.tool()
 def get_risk_digest(
     domain: str | None = None, digest_id: str | None = None
 ) -> dict[str, Any]:
-    """Get the latest risk digest for a target company.
+    """Get the authoritative risk digest for a target company.
 
     Pass the target's domain (e.g. "acme.example") or an exact
-    digest_id from list_digests; when both match several runs, the
-    newest run wins. Returns the rating, score, deal decision, rating
-    caps in plain words, confidence, the top 5 risks with triage
-    costs, counts of management claims by verdict, the total
-    remediation cost, and the executive summary for the IC memo.
+    digest_id from list_digests. A domain resolves to the authoritative
+    run: the complete assessment with the most inputs (outside-in plus
+    SOC 2 plus interview beats fewer), then the newest. Returns the
+    rating, score, deal decision, rating caps in plain words,
+    confidence, the top 5 risks with triage costs, counts of
+    management claims by verdict, the total remediation cost, the
+    inputs behind it, how many runs it supersedes, and the executive
+    summary for the IC memo.
     """
     if not domain and not digest_id:
         raise ValueError("Pass domain or digest_id (or both).")
-    entry = _latest_for(_complete_entries(), domain, digest_id)
+    entries = _complete_entries()
+    entry = _resolve_entry(entries, domain, digest_id)
     digest = _read_digest(entry["digest_id"])
+    target_domain = (digest.get("target") or {}).get("domain")
+    superseded_runs = sum(
+        1
+        for other in entries
+        if other["digest_id"] != entry["digest_id"]
+        and (other.get("target") or {}).get("domain") == target_domain
+    )
     overall = digest.get("overall", {})
     plan = digest.get("remediation_plan", {})
     findings = sorted(
@@ -174,6 +202,8 @@ def get_risk_digest(
         "executive_summary": (
             digest.get("narrative") or {}
         ).get("executive_summary"),
+        "inputs": digest.get("inputs", {}),
+        "superseded_runs": superseded_runs,
     }
 
 

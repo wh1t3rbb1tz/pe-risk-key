@@ -66,7 +66,15 @@ from pe_risk_key.schemas import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = ROOT / "eval" / "runs"
+
+
+def resolve_runs_dir() -> Path:
+    """Runs directory, overridable via PE_RISK_KEY_RUNS_DIR."""
+    override = os.getenv("PE_RISK_KEY_RUNS_DIR")
+    return Path(override) if override else ROOT / "eval" / "runs"
+
+
+RUNS_DIR = resolve_runs_dir()
 SCORING_PATH = ROOT / "scoring.yaml"
 
 MAX_TURNS = 6

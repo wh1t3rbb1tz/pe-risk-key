@@ -34,7 +34,15 @@ from pe_risk_key.validate import validate_digest
 NARRATIVE_PENDING = "Narrative pending."
 
 ROOT = Path(__file__).resolve().parents[3]
-RUNS_DIR = ROOT / "eval" / "runs"
+
+
+def resolve_runs_dir() -> Path:
+    """Runs directory, overridable via PE_RISK_KEY_RUNS_DIR."""
+    override = os.getenv("PE_RISK_KEY_RUNS_DIR")
+    return Path(override) if override else ROOT / "eval" / "runs"
+
+
+RUNS_DIR = resolve_runs_dir()
 UPLOAD_DIR = ROOT / ".uploads"
 WEB_DIR = ROOT / "web"
 
@@ -249,6 +257,31 @@ async def upload_file(file: UploadFile = File(...)) -> dict[str, str]:
     return _store_upload(file.filename or "upload", await file.read())
 
 
+def _mark_authoritative(runs: list[dict[str, Any]]) -> None:
+    """Flag one authoritative run per target domain in place.
+
+    Among complete, schema-valid runs for a domain, the most inputs
+    wins (outside-in + SOC 2 + interview beats fewer), then the
+    newest. The rest point at it via superseded_by.
+    """
+    by_domain: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        if not run["complete"]:
+            continue
+        domain = (run.get("target") or {}).get("domain")
+        if domain:
+            by_domain.setdefault(domain, []).append(run)
+    for group in by_domain.values():
+        ranked = sorted(
+            group,
+            key=lambda r: (r["input_count"], r["generated_at"] or ""),
+            reverse=True,
+        )
+        ranked[0]["authoritative"] = True
+        for other in ranked[1:]:
+            other["superseded_by"] = ranked[0]["digest_id"]
+
+
 @app.get("/api/digests")
 def list_digests() -> dict[str, list[dict[str, Any]]]:
     """Runs from eval/runs/, newest first, with digest state."""
@@ -282,6 +315,8 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                 and bool(summary)
                 and summary != NARRATIVE_PENDING
             )
+            has_soc2 = bool(inputs.get("documents"))
+            has_interview = bool(inputs.get("interviews"))
             runs.append(
                 {
                     "digest_id": run_dir.name,
@@ -296,8 +331,13 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "cost": _run_cost(run_dir),
                     "complete": complete,
                     "schema_valid": schema_valid,
-                    "has_soc2": bool(inputs.get("documents")),
-                    "has_interview": bool(inputs.get("interviews")),
+                    "has_soc2": has_soc2,
+                    "has_interview": has_interview,
+                    "input_count": (1 if inputs.get("domain_scan") else 0)
+                    + has_soc2
+                    + has_interview,
+                    "authoritative": False,
+                    "superseded_by": None,
                 }
             )
             continue
@@ -318,6 +358,9 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                     "schema_valid": False,
                     "has_soc2": False,
                     "has_interview": False,
+                    "input_count": 0,
+                    "authoritative": False,
+                    "superseded_by": None,
                     **(
                         {"error": job["error"]}
                         if job.get("status") == "error"
@@ -346,8 +389,12 @@ def list_digests() -> dict[str, list[dict[str, Any]]]:
                 "schema_valid": False,
                 "has_soc2": False,
                 "has_interview": False,
+                "input_count": 0,
+                "authoritative": False,
+                "superseded_by": None,
             }
         )
+    _mark_authoritative(runs)
     dated = sorted(
         (run for run in runs if run["generated_at"]),
         key=lambda run: run["generated_at"],
@@ -509,6 +556,11 @@ def demo_inputs() -> dict[str, Any]:
     interview_src = (
         ROOT / "fixtures" / "interviews" / "brightwater_cto_interview.wav"
     )
+    fixture_target = json.loads(
+        (
+            ROOT / "fixtures" / "outside_in" / "brightwaterfleet.example.json"
+        ).read_text(encoding="utf-8")
+    )["target"]
 
     def staged(source: Path) -> dict[str, Any] | None:
         if not source.exists():
@@ -520,11 +572,11 @@ def demo_inputs() -> dict[str, Any]:
         }
 
     return {
-        "domain": "brightwaterfleet.example",
-        "company": "Brightwater Fleet Systems, Inc.",
+        "domain": fixture_target["domain"],
+        "company": fixture_target["name"],
         "aliases": [],
-        "employee_band": "201-1000",
-        "revenue_band": "50M-250M",
+        "employee_band": fixture_target["employee_band"],
+        "revenue_band": fixture_target["revenue_band"],
         "speaker_names": ["Diligence Lead", "Dana Reyes (CTO)"],
         "target_speaker": "Dana Reyes (CTO)",
         "as_of": date.today().isoformat(),

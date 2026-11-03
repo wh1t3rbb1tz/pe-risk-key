@@ -16,7 +16,9 @@ import yaml
 
 import pe_risk_key.agent.context as agent_context
 import pe_risk_key.agent.orchestrator as orchestrator
+import pe_risk_key.analyzers.interview as interview_module
 import pe_risk_key.analyzers.soc2 as soc2_module
+import pe_risk_key.engine.crosscheck as crosscheck_module
 from pe_risk_key.agent import run_digest
 from pe_risk_key.agent.prompts import system_prompt
 from pe_risk_key.collectors import incidents, kev, net, web_posture
@@ -959,3 +961,209 @@ def test_merge_usage_breakdown_with_transcription_entry():
     assert merged["cached_tokens"] == 0
     assert merged["estimated_cost_usd"] == pytest.approx(0.00593)
     assert merged["components"]["transcription"]["audio_hours"] == 0.0285
+
+
+CTO_NAME = "Dana Reyes (CTO)"
+
+_INTERVIEW_TRANSCRIBE_RESPONSE = {
+    "sessionId": "live",
+    "transcript": "DMARC is enforced. We have immutable backups.",
+    "audioDurationMs": 65000,
+    "turns": [
+        {
+            "turnId": 1,
+            "startMs": 0,
+            "endMs": 65000,
+            "transcript": "DMARC is enforced. We have immutable backups.",
+            "speaker": "A",
+        }
+    ],
+}
+
+
+class _ScriptedInterviewClient:
+    extraction = {}
+
+    def __init__(self, role, mode="standard", **kwargs):
+        assert role in ("transcription", "claim_extraction"), role
+        self.total_usage = {
+            "prompt_tokens": 500,
+            "completion_tokens": 100,
+            "cached_tokens": 0,
+        }
+
+    def transcribe(self, audio, **kwargs):
+        return copy.deepcopy(_INTERVIEW_TRANSCRIBE_RESPONSE)
+
+    def chat_json(
+        self, messages, *, schema, schema_name, reasoning_effort=None
+    ):
+        return copy.deepcopy(type(self).extraction)
+
+
+class _ScriptedCrosscheckClient:
+    verdicts: list = []
+
+    def __init__(self, role, mode="standard", **kwargs):
+        assert role == "crosscheck", role
+        self.total_usage = {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "cached_tokens": 0,
+        }
+
+    def chat_json(
+        self, messages, *, schema, schema_name, reasoning_effort=None
+    ):
+        return {"verdicts": copy.deepcopy(type(self).verdicts)}
+
+
+def _run_interview_digest(agent_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        agent_context,
+        "registry_run",
+        lambda *args, **kwargs: {
+            "status": "ok",
+            "collection_method": "dns_query",
+        },
+    )
+    _ScriptedInterviewClient.extraction = {
+        "claims": [
+            {"text": "DMARC is enforced.", "claim_type": "control_exists"},
+            {
+                "text": "We have immutable backups.",
+                "claim_type": "control_exists",
+            },
+        ]
+    }
+    monkeypatch.setattr(
+        interview_module, "ModelClient", _ScriptedInterviewClient
+    )
+    monkeypatch.setattr(
+        interview_module, "CACHE_DIR", tmp_path / "transcripts"
+    )
+    _ScriptedCrosscheckClient.verdicts = [
+        {
+            "claim_index": 0,
+            "verdict": "contradicted",
+            "evidence_refs": ["F-002"],
+            "explanation": "DMARC finding contradicts the claim.",
+        },
+        {
+            "claim_index": 1,
+            "verdict": "supported",
+            "evidence_refs": ["E-001"],
+            "explanation": "Backup evidence corroborates the claim.",
+        },
+    ]
+    monkeypatch.setattr(
+        crosscheck_module, "ModelClient", _ScriptedCrosscheckClient
+    )
+    agent_env.turns = [
+        {
+            "content": "Plan: run every collector.",
+            "tool_calls": [
+                {"name": "check_email_auth", "arguments": {}},
+                {"name": "check_dnssec", "arguments": {}},
+                {"name": "enumerate_ct_subdomains", "arguments": {}},
+                {"name": "check_web_posture", "arguments": {}},
+                {"name": "match_known_exploited", "arguments": {}},
+                {"name": "search_public_incidents", "arguments": {}},
+            ],
+        },
+        {
+            "content": "Submitting.",
+            "tool_calls": [_submit(_finding(), _dmarc_finding())],
+        },
+    ]
+    audio = tmp_path / "cto.wav"
+    audio.write_bytes(b"RIFFfake-wav-bytes")
+    return run_digest(
+        DOMAIN,
+        "Acme",
+        "201-1000",
+        "50M-250M",
+        interview_path=audio,
+        speaker_names=[CTO_NAME],
+        target_speakers=[CTO_NAME],
+    )
+
+
+def test_interview_digest_validates_with_contradictions(
+    agent_env, monkeypatch, tmp_path
+):
+    result = _run_interview_digest(agent_env, monkeypatch, tmp_path)
+    digest = _read_digest(result)
+    assert validate_digest(digest) == []
+    assert [c["contradiction_id"] for c in digest["contradictions"]] == [
+        "C-001",
+        "C-002",
+    ]
+    assert [c["verdict"] for c in digest["contradictions"]] == [
+        "contradicted",
+        "supported",
+    ]
+    assert [c["severity"] for c in digest["contradictions"]] == [
+        "high",
+        "info",
+    ]
+    assert digest["contradictions"][0]["evidence_refs"] == ["F-002"]
+    assert digest["inputs"]["interviews"] == [
+        {
+            "interview_id": "int_" + result["digest_id"][3:],
+            "filename": "cto.wav",
+            "sha256": hashlib.sha256(b"RIFFfake-wav-bytes").hexdigest(),
+            "duration_seconds": 65,
+            "speakers": [CTO_NAME],
+        }
+    ]
+    roles = [p["role"] for p in digest["mode"]["providers"]]
+    assert roles == [
+        "orchestrator",
+        "public_records",
+        "transcription",
+        "claim_extraction",
+        "crosscheck",
+    ]
+    assert digest["overall"]["confidence"] == "medium"
+    assert "No management interview provided" not in digest["limitations"]
+    by_function = {e["function"]: e for e in digest["function_scores"]}
+    assert by_function["GV"]["assessed"] is True
+
+
+def test_interview_trace_events_per_claim(agent_env, monkeypatch, tmp_path):
+    result = _run_interview_digest(agent_env, monkeypatch, tmp_path)
+    trace = _read_trace(result)
+    starts = [e for e in trace if e["type"] == "transcription_start"]
+    ends = [e for e in trace if e["type"] == "transcription_end"]
+    assert len(starts) == 1
+    assert len(ends) == 1
+    assert ends[0]["audio_seconds"] == 65.0
+    assert ends[0]["cached"] is False
+    extracted = [e for e in trace if e["type"] == "claims_extracted"]
+    assert len(extracted) == 1
+    assert extracted[0]["claim_count"] == 2
+    verdicts = [e for e in trace if e["type"] == "crosscheck_verdict"]
+    assert [(v["claim_index"], v["verdict"]) for v in verdicts] == [
+        (0, "contradicted"),
+        (1, "supported"),
+    ]
+    assert verdicts[0]["text"] == "DMARC is enforced."
+    assert verdicts[0]["refs"] == ["F-002"]
+    assert verdicts[1]["contradiction_id"] == "C-002"
+
+
+def test_interview_usage_components(agent_env, monkeypatch, tmp_path):
+    result = _run_interview_digest(agent_env, monkeypatch, tmp_path)
+    components = result["usage"]["components"]
+    assert set(components) == {
+        "orchestrator",
+        "transcription",
+        "claim_extraction",
+        "crosscheck",
+    }
+    assert components["transcription"]["audio_hours"] == round(
+        65 / 3600, 6
+    )
+    assert components["claim_extraction"]["prompt_tokens"] == 500
+    assert components["crosscheck"]["completion_tokens"] == 10

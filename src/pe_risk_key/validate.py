@@ -6,6 +6,11 @@ schema, IDs that reference other parts of the digest must resolve:
 - contradiction ``evidence_refs`` (``E-NNN`` / ``F-NNN``) must exist,
 - deal recommendation ``basis_ids`` (``F-NNN`` / ``C-NNN``) must exist,
 - remediation plan ``finding_ids`` (``F-NNN``) must exist.
+
+``E-NNN`` refs resolve against evidence attached to findings, plus the
+run-level evidence pool when ``evidence_pool`` is passed (cross-check
+citations may point at pool items, e.g. clean-control results, that no
+finding embeds).
 """
 
 from __future__ import annotations
@@ -27,7 +32,9 @@ def _load_schema(path: str) -> dict[str, Any]:
 
 
 def validate_digest(
-    digest: Any, schema_path: Path | str | None = None
+    digest: Any,
+    schema_path: Path | str | None = None,
+    evidence_pool: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Validate a digest dict.
 
@@ -44,7 +51,7 @@ def validate_digest(
         f"{err.json_path}: {err.message}"
         for err in sorted(validator.iter_errors(digest), key=lambda e: e.json_path)
     ]
-    errors.extend(_check_cross_references(digest))
+    errors.extend(_check_cross_references(digest, evidence_pool))
     return errors
 
 
@@ -57,7 +64,10 @@ def _id_set(items: Any, key: str) -> set[str]:
     return ids
 
 
-def _check_cross_references(digest: dict[str, Any]) -> list[str]:
+def _check_cross_references(
+    digest: dict[str, Any],
+    evidence_pool: list[dict[str, Any]] | None = None,
+) -> list[str]:
     errors: list[str] = []
     findings = digest.get("findings")
     finding_ids = _id_set(findings, "finding_id")
@@ -66,6 +76,7 @@ def _check_cross_references(digest: dict[str, Any]) -> list[str]:
         for finding in findings:
             if isinstance(finding, dict):
                 evidence_ids.update(_id_set(finding.get("evidence"), "evidence_id"))
+    evidence_ids.update(_id_set(evidence_pool, "evidence_id"))
     contradiction_ids = _id_set(digest.get("contradictions"), "contradiction_id")
 
     def check(

@@ -423,3 +423,19 @@ def test_confidence_levels():
         has_interview=True,
     )
     assert out["overall"]["confidence"] == "low"
+
+
+def test_cap_contradiction_fires_with_two_highs():
+    contradictions = [
+        _contradiction("contradicted", "high"),
+        _contradiction("contradicted", "high"),
+    ]
+    out = score_digest([], contradictions, SCORING, revenue_band="50M-250M")
+    assert out["overall"]["rating_caps_applied"] == ["CAP-CONTRADICTION"]
+    out = score_digest(
+        [],
+        [_contradiction("contradicted", "high")],
+        SCORING,
+        revenue_band="50M-250M",
+    )
+    assert out["overall"]["rating_caps_applied"] == []

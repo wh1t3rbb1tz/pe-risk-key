@@ -7,6 +7,7 @@ run manually, not from the test suite.
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -86,6 +87,58 @@ def print_recall(findings: list[dict], domain: str) -> None:
     print(f"must_not_find hits: {sorted(got & must) or '-'}")
 
 
+def print_contradiction_recall(contradictions: list[dict], domain: str) -> None:
+    expected_path = ROOT / "fixtures" / "expected" / f"{domain}.yaml"
+    if not expected_path.exists():
+        print(f"\ncontradictions: no expected file for {domain}, skipped")
+        return
+    expected = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
+    wanted = expected.get("expected_contradictions", [])
+    if not wanted:
+        print("\ncontradictions: no contradiction expectations")
+        return
+    matched = 0
+    correct = 0
+    misses: list[str] = []
+    wrong: list[str] = []
+    for entry in wanted:
+        pattern = entry.get("match_keywords", "")
+        hit = next(
+            (
+                c
+                for c in contradictions
+                if pattern
+                and re.search(pattern, c["claim"]["text"], re.IGNORECASE)
+            ),
+            None,
+        )
+        label = f"claim {entry.get('claim_ref')}: {entry.get('topic')}"
+        if hit is None:
+            misses.append(label)
+            continue
+        matched += 1
+        if hit["verdict"] == entry.get("verdict"):
+            correct += 1
+        else:
+            wrong.append(
+                f"{label} (want {entry.get('verdict')}, "
+                f"got {hit['verdict']})"
+            )
+    print(
+        f"\ncontradiction recall: {matched}/{len(wanted)} = "
+        f"{matched / len(wanted) * 100:.1f}%"
+    )
+    print(f"missing claims: {misses or '-'}")
+    if matched:
+        print(
+            f"verdict accuracy: {correct}/{matched} = "
+            f"{correct / matched * 100:.1f}%"
+        )
+        print(f"wrong verdicts: {wrong or '-'}")
+    else:
+        print("verdict accuracy: n/a (no matched claims)")
+
+
 def print_soc2_summary(digest: dict) -> None:
     analysis = digest.get("soc2_analysis")
     if analysis is None:
@@ -158,6 +211,9 @@ def main() -> int:
     parser.add_argument("--demo", action="store_true")
     parser.add_argument("--soc2", default=None, help="Path to a SOC 2 report")
     parser.add_argument("--as-of", default=None, help="YYYY-MM-DD")
+    parser.add_argument("--interview", default=None, help="Path to interview audio")
+    parser.add_argument("--speakers", default="")
+    parser.add_argument("--target", default=[], action="append")
     args = parser.parse_args()
     if args.demo:
         os.environ["DEMO_MODE"] = "1"
@@ -165,6 +221,9 @@ def main() -> int:
     from pe_risk_key.agent import run_digest
 
     aliases = [a for a in args.aliases.split(",") if a] if args.aliases else []
+    speaker_names = (
+        [s for s in args.speakers.split(",") if s] if args.speakers else None
+    )
     result = run_digest(
         args.domain,
         args.company,
@@ -174,6 +233,9 @@ def main() -> int:
         industry=args.industry,
         soc2_path=args.soc2,
         as_of=args.as_of,
+        interview_path=args.interview,
+        speaker_names=speaker_names,
+        target_speakers=args.target or None,
     )
     print(f"=== run_digest: {args.domain} ({result['digest_id']}) ===")
     trace = [
@@ -190,6 +252,7 @@ def main() -> int:
     digest = json.loads(digest_path.read_text(encoding="utf-8"))
     print_soc2_summary(digest)
     print_digest_summary(digest)
+    print_contradiction_recall(digest["contradictions"], args.domain)
     print(f"saved: {Path(result['trace_path']).parent.relative_to(ROOT)}/")
     return 0
 

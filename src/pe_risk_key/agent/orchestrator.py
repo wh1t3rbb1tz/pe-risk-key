@@ -24,17 +24,23 @@ import yaml
 
 import pe_risk_key.collectors as collectors
 from pe_risk_key.agent.context import RunContext, new_digest_id
+from pe_risk_key.analyzers.interview import (
+    extract_claims,
+    transcribe_interview,
+)
 from pe_risk_key.analyzers.soc2 import SOC2Result, analyze_soc2
 from pe_risk_key.agent.prompts import (
     coverage_followup,
     system_prompt,
     target_brief,
 )
+from pe_risk_key.engine.crosscheck import crosscheck_claims
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.engine.scoring import score_digest
 from pe_risk_key.providers import (
     SPARK_MODEL,
     STANDARD_PROVIDER,
+    VOICE_MODEL,
     WONDER_MODEL,
     Mode,
     ModelClient,
@@ -326,6 +332,43 @@ def _run_soc2_analysis(
 _REPORT_TYPE_TO_DOC = {"type1": "soc2_type1", "type2": "soc2_type2"}
 
 
+def _run_interview(
+    ctx: RunContext,
+    interview_path: str | Path,
+    interview_id: str,
+    speaker_names: list[str] | None,
+    target_speakers: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Transcribe then extract claims; returns (transcript, claims)."""
+    ctx.trace.event("transcription_start", interview_id=interview_id)
+    started = time.monotonic()
+    transcript = transcribe_interview(
+        interview_path, interview_id, speaker_names=speaker_names
+    )
+    duration_ms = round((time.monotonic() - started) * 1000, 1)
+    ctx.trace.event(
+        "transcription_end",
+        interview_id=interview_id,
+        duration_ms=duration_ms,
+        audio_seconds=transcript["duration_seconds"],
+        cached=transcript["cached"],
+        estimated_cost_usd=transcript["estimated_cost_usd"],
+    )
+    claims_result = extract_claims(transcript, target_speakers)
+    ctx.trace.event(
+        "claims_extracted",
+        interview_id=interview_id,
+        claim_count=len(claims_result["claims"]),
+        dropped_unquoted=len(claims_result["dropped_unquoted"]),
+        dropped_not_target=len(claims_result["dropped_not_target"]),
+        tokens={
+            key: claims_result["usage"].get(key, 0)
+            for key in ("prompt_tokens", "completion_tokens", "cached_tokens")
+        },
+    )
+    return transcript, claims_result
+
+
 def _assemble_digest(
     *,
     digest_id: str,
@@ -342,6 +385,9 @@ def _assemble_digest(
     trace_path: str,
     soc2_result: SOC2Result | None = None,
     soc2_analysis: dict[str, Any] | None = None,
+    contradictions: list[dict[str, Any]] | None = None,
+    interview_entry: dict[str, Any] | None = None,
+    ran_crosscheck: bool = False,
 ) -> dict[str, Any]:
     """Build the full digest dict per digest.schema.json."""
     target: dict[str, Any] = {
@@ -386,6 +432,31 @@ def _assemble_digest(
                 "sha256": soc2_result.sha256,
             }
         )
+    interviews: list[dict[str, Any]] = []
+    if interview_entry is not None:
+        interviews.append(interview_entry)
+        providers.append(
+            {
+                "role": "transcription",
+                "provider": STANDARD_PROVIDER,
+                "model": VOICE_MODEL,
+            }
+        )
+        providers.append(
+            {
+                "role": "claim_extraction",
+                "provider": STANDARD_PROVIDER,
+                "model": WONDER_MODEL,
+            }
+        )
+        if ran_crosscheck:
+            providers.append(
+                {
+                    "role": "crosscheck",
+                    "provider": STANDARD_PROVIDER,
+                    "model": WONDER_MODEL,
+                }
+            )
     digest = {
         "schema_version": "1.0.0",
         "digest_id": digest_id,
@@ -399,12 +470,12 @@ def _assemble_digest(
         "inputs": {
             "domain_scan": True,
             "documents": documents,
-            "interviews": [],
+            "interviews": interviews,
         },
         "overall": scored["overall"],
         "function_scores": scored["function_scores"],
         "findings": findings,
-        "contradictions": [],
+        "contradictions": contradictions if contradictions is not None else [],
         "remediation_plan": scored["remediation_plan"],
         "deal_recommendations": [],
         "narrative": {"executive_summary": "Narrative pending."},
@@ -426,13 +497,18 @@ def run_digest(
     mode: Mode = "standard",
     soc2_path: str | Path | None = None,
     as_of: date | str | None = None,
+    interview_path: str | Path | None = None,
+    speaker_names: list[str] | None = None,
+    target_speakers: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the orchestrator end to end; returns the digest result.
 
     When ``soc2_path`` is given, the SOC 2 analyzer runs concurrently
     with the model loop's first turn and its findings merge into the
     digest after the outside-in findings are finalized. ``as_of``
-    defaults to today.
+    defaults to today. When ``interview_path`` is given, transcription
+    and claim extraction run concurrently too, and cross-check runs
+    after all findings are merged.
 
     Returns ``{digest_id, findings, collector_outputs, adjustments,
     trace_path, usage}`` and writes ``trace.jsonl``,
@@ -494,6 +570,20 @@ def run_digest(
             soc2_path,
             soc2_doc_id,
             as_of or date.today(),
+        )
+    interview_future: Future[tuple[dict[str, Any], dict[str, Any]]] | None = (
+        None
+    )
+    interview_id: str | None = None
+    if interview_path is not None:
+        interview_id = "int_" + digest_id[3:]
+        interview_future = pool.submit(
+            _run_interview,
+            ctx,
+            interview_path,
+            interview_id,
+            speaker_names,
+            list(target_speakers or []),
         )
     try:
         for turn in range(MAX_TURNS):
@@ -618,6 +708,18 @@ def run_digest(
             )
             raise
 
+    interview_data: tuple[dict[str, Any], dict[str, Any]] | None = None
+    if interview_future is not None:
+        try:
+            interview_data = interview_future.result()
+        except Exception as exc:
+            ctx.trace.event(
+                "interview_error",
+                interview_id=interview_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            raise
+
     findings_in = submitted if submitted is not None else []
     constrained, adjustments = apply_rule_constraints(
         findings_in, scoring, employee_band
@@ -676,13 +778,42 @@ def run_digest(
         json.dumps({"evidence": evidence_pool}, indent=2), encoding="utf-8"
     )
 
+    contradictions: list[dict[str, Any]] = []
+    crosscheck_result: dict[str, Any] | None = None
+    interview_entry: dict[str, Any] | None = None
+    if interview_data is not None:
+        transcript, claims_result = interview_data
+        interview_entry = {
+            "interview_id": interview_id,
+            "filename": Path(interview_path).name,
+            "sha256": transcript["sha256"],
+            "duration_seconds": int(round(transcript["duration_seconds"])),
+        }
+        if speaker_names:
+            interview_entry["speakers"] = list(speaker_names)
+        claims = claims_result["claims"]
+        if claims:
+            crosscheck_result = crosscheck_claims(
+                claims, merged, evidence_pool
+            )
+            contradictions = crosscheck_result["contradictions"]
+            for claim, contradiction in zip(claims, contradictions):
+                ctx.trace.event(
+                    "crosscheck_verdict",
+                    claim_index=claim["claim_index"],
+                    contradiction_id=contradiction["contradiction_id"],
+                    text=contradiction["claim"]["text"],
+                    verdict=contradiction["verdict"],
+                    refs=contradiction["evidence_refs"],
+                )
+
     scored = score_digest(
         merged,
-        [],
+        contradictions,
         scoring,
         domain_scan=True,
         has_soc2=soc2_analysis is not None,
-        has_interview=False,
+        has_interview=interview_data is not None,
         soc2_opinion=soc2_analysis["opinion"] if soc2_analysis else None,
         revenue_band=revenue_band,
     )
@@ -706,8 +837,11 @@ def run_digest(
         trace_path=str(run_dir / "trace.jsonl"),
         soc2_result=soc2_result,
         soc2_analysis=soc2_analysis,
+        contradictions=contradictions,
+        interview_entry=interview_entry,
+        ran_crosscheck=crosscheck_result is not None,
     )
-    digest_errors = validate_digest(digest)
+    digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
     (run_dir / "digest.json").write_text(
         json.dumps(digest, indent=2), encoding="utf-8"
     )
@@ -730,6 +864,21 @@ def run_digest(
         components["document_analysis"] = {
             **soc2_result.usage,
             "estimated_cost_usd": soc2_result.estimated_cost_usd,
+        }
+    if interview_data is not None:
+        transcript, claims_result = interview_data
+        components["transcription"] = {
+            **transcript["usage"],
+            "estimated_cost_usd": transcript["estimated_cost_usd"],
+        }
+        components["claim_extraction"] = {
+            **claims_result["usage"],
+            "estimated_cost_usd": claims_result["estimated_cost_usd"],
+        }
+    if crosscheck_result is not None:
+        components["crosscheck"] = {
+            **crosscheck_result["usage"],
+            "estimated_cost_usd": crosscheck_result["estimated_cost_usd"],
         }
     usage = merge_usage_breakdown(components)
     ctx.trace.event("run_end", usage=usage)

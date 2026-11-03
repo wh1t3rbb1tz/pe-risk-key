@@ -159,3 +159,11 @@ def test_fixture_not_mutated_across_tests():
     assert validate_digest(digest) != []
     assert validate_digest(first) == []
     assert copy.deepcopy(first) == _valid_digest()
+
+
+def test_contradiction_pool_only_ref_needs_pool():
+    digest = _valid_digest()
+    digest["contradictions"][0]["evidence_refs"] = ["E-004"]
+    assert validate_digest(digest) != []
+    pool = [{"evidence_id": "E-004"}]
+    assert validate_digest(digest, evidence_pool=pool) == []

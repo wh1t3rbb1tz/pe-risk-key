@@ -44,15 +44,15 @@ expected_soc2:
   cuec_count: 5
 
 expected_contradictions:
-  - { claim_ref: 1, topic: admin MFA coverage,      verdict: contradicted, severity: high }
-  - { claim_ref: 2, topic: automated offboarding,   verdict: contradicted, severity: high }
-  - { claim_ref: 3, topic: every alert reviewed,    verdict: contradicted, severity: high }
-  - { claim_ref: 4, topic: DMARC enforced,          verdict: contradicted, severity: high }
-  - { claim_ref: 5, topic: no breach history,       verdict: contradicted, severity: high }
-  - { claim_ref: 6, topic: legacy decommissioned,   verdict: contradicted, severity: medium }
-  - { claim_ref: 7, topic: clean pen test,          verdict: contradicted, severity: medium }
-  - { claim_ref: 8, topic: immutable backups,       verdict: supported }
-  - { claim_ref: 9, topic: bridge letter available, verdict: supported }
+  - { claim_ref: 1, topic: admin MFA coverage,      verdict: contradicted, severity: high,   match_keywords: "MFA" }
+  - { claim_ref: 2, topic: automated offboarding,   verdict: contradicted, severity: high,   match_keywords: "offboard|revoked|same day" }
+  - { claim_ref: 3, topic: every alert reviewed,    verdict: contradicted, severity: high,   match_keywords: "alert" }
+  - { claim_ref: 4, topic: DMARC enforced,          verdict: contradicted, severity: high,   match_keywords: "DMARC|spoof" }
+  - { claim_ref: 5, topic: no breach history,       verdict: contradicted, severity: high,   match_keywords: "breach" }
+  - { claim_ref: 6, topic: legacy decommissioned,   verdict: contradicted, severity: medium, match_keywords: "legacy|decommission" }
+  - { claim_ref: 7, topic: clean pen test,          verdict: contradicted, severity: medium, match_keywords: "pen test|no highs" }
+  - { claim_ref: 8, topic: immutable backups,       verdict: supported, match_keywords: "backup|immutable" }
+  - { claim_ref: 9, topic: bridge letter available, verdict: supported, match_keywords: "bridge letter" }
 
 expected_overall:
   # Caps that must fire. Exact score is asserted in tests/test_scoring.py

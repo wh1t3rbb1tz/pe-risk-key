@@ -1283,7 +1283,12 @@ def _run_narrative_digest(agent_env, monkeypatch, outputs):
 
 def _narrative_output():
     return {
-        "executive_summary": "Rating C with a gap [F-001].",
+        "executive_summary": (
+            "Bottom line: rating A with no material gap [F-001]. "
+            "Key risks: one low finding. "
+            "Management credibility: nothing to assess. "
+            "Next steps: proceed."
+        ),
         "key_questions_for_management": [
             f"Question {index} about controls [F-001]?"
             for index in range(5)
@@ -1291,9 +1296,14 @@ def _narrative_output():
         "deal_recommendations": [
             {
                 "type": "closing_condition",
-                "text": "Require the fix in days_31_60.",
+                "text": "Require the fix in Days 31-60.",
                 "basis_ids": ["F-001"],
-            }
+            },
+            {
+                "type": "price_adjustment",
+                "text": "No adjustment warranted.",
+                "basis_ids": ["F-001"],
+            },
         ],
     }
 
@@ -1304,7 +1314,7 @@ def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
     )
     digest = _read_digest(result)
     assert validate_digest(digest) == []
-    assert digest["narrative"]["executive_summary"].startswith("Rating C")
+    assert digest["narrative"]["executive_summary"].startswith("Bottom line:")
     assert len(digest["narrative"]["key_questions_for_management"]) == 5
     assert digest["deal_recommendations"][0]["type"] == "closing_condition"
     assert "narrative" in [p["role"] for p in digest["mode"]["providers"]]
@@ -1312,8 +1322,8 @@ def test_narrative_fills_digest_and_memo(agent_env, monkeypatch):
         encoding="utf-8"
     )
     assert "# IC Memo: Acme" in memo
-    assert "| F-001 |" in memo
-    assert "closing_condition" in memo
+    assert "(F-001," in memo
+    assert "### Closing condition" in memo
     trace = _read_trace(result)
     complete = [e for e in trace if e["type"] == "narrative_complete"]
     assert len(complete) == 1
@@ -1330,7 +1340,9 @@ def test_narrative_validation_failed_adds_limitation(agent_env, monkeypatch):
     result = _run_narrative_digest(agent_env, monkeypatch, [bad, bad])
     digest = _read_digest(result)
     assert validate_digest(digest) == []
-    assert digest["deal_recommendations"] == []
+    assert [r["type"] for r in digest["deal_recommendations"]] == [
+        "price_adjustment"
+    ]
     assert "narrative validation incomplete" in digest["limitations"]
     trace = _read_trace(result)
     complete = [e for e in trace if e["type"] == "narrative_complete"]

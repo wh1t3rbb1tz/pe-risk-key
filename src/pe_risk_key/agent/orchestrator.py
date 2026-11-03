@@ -41,6 +41,7 @@ from pe_risk_key.engine.crosscheck import (
 from pe_risk_key.engine.narrative import (
     generate_narrative,
     render_ic_memo,
+    required_recommendation_types,
 )
 from pe_risk_key.engine.rules import apply_rule_constraints
 from pe_risk_key.engine.scoring import score_digest
@@ -877,6 +878,15 @@ def run_digest(
             "remediation_plan": scored["remediation_plan"],
             "soc2_summary": soc2_summary,
             "limitations": scored["limitations"],
+            "required_recommendations": required_recommendation_types(
+                findings=merged,
+                caps_applied=scored["overall"]["rating_caps_applied"],
+                remediation_plan=scored["remediation_plan"],
+                revenue_midpoint_usd=scoring["revenue_midpoint_usd"][
+                    revenue_band
+                ],
+                soc2_analysis=soc2_analysis,
+            ),
         }
     )
     if not narrative_result["valid"]:
@@ -914,9 +924,6 @@ def run_digest(
     digest_errors = validate_digest(digest, evidence_pool=evidence_pool)
     (run_dir / "digest.json").write_text(
         json.dumps(digest, indent=2), encoding="utf-8"
-    )
-    (run_dir / "ic_memo.md").write_text(
-        render_ic_memo(digest), encoding="utf-8"
     )
     ctx.trace.event(
         "digest_validated",
@@ -958,6 +965,14 @@ def run_digest(
         "estimated_cost_usd": narrative_result["estimated_cost_usd"],
     }
     usage = merge_usage_breakdown(components)
+    (run_dir / "ic_memo.md").write_text(
+        render_ic_memo(
+            digest,
+            evidence_pool=evidence_pool,
+            run_cost_usd=usage["estimated_cost_usd"],
+        ),
+        encoding="utf-8",
+    )
     ctx.trace.event("run_end", usage=usage)
     return {
         "digest_id": digest_id,

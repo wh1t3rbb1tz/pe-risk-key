@@ -259,6 +259,126 @@ def test_post_rejects_unknown_upload(client):
     assert response.status_code == 400
 
 
+def test_post_demo_inputs_resolve_fixtures(client, api_env, monkeypatch):
+    assert api.DEMO_SOC2_PATH.exists()
+    assert api.DEMO_INTERVIEW_PATH.exists()
+    started = threading.Event()
+
+    def fake_run_digest(**kwargs):
+        run_dir = api_env / "runs" / kwargs["digest_id"]
+        run_dir.mkdir(parents=True)
+        (run_dir / "digest.json").write_text(
+            json.dumps(
+                {
+                    "digest_id": kwargs["digest_id"],
+                    "inputs": {
+                        "documents": [
+                            {"path": str(kwargs["soc2_path"])}
+                        ],
+                        "interviews": [
+                            {
+                                "path": str(kwargs["interview_path"]),
+                                "speakers": kwargs["speaker_names"],
+                                "targets": kwargs["target_speakers"],
+                            }
+                        ],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        started.set()
+
+    monkeypatch.setattr(api, "run_digest", fake_run_digest)
+    response = client.post(
+        "/api/digests",
+        json=_post_body(
+            demo=True,
+            use_demo_inputs=True,
+            speaker_names=["Diligence Lead", "Dana Reyes (CTO)"],
+            target_speaker="Dana Reyes (CTO)",
+        ),
+    )
+    assert response.status_code == 202
+    assert started.wait(5)
+    digest = json.loads(
+        (
+            api_env / "runs" / response.json()["digest_id"] / "digest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert digest["inputs"]["documents"] == [
+        {"path": str(api.DEMO_SOC2_PATH)}
+    ]
+    assert digest["inputs"]["interviews"][0]["path"] == str(
+        api.DEMO_INTERVIEW_PATH
+    )
+    assert digest["inputs"]["interviews"][0]["speakers"] == [
+        "Diligence Lead",
+        "Dana Reyes (CTO)",
+    ]
+    assert digest["inputs"]["interviews"][0]["targets"] == [
+        "Dana Reyes (CTO)"
+    ]
+
+
+def test_post_demo_inputs_requires_demo_flag(client):
+    response = client.post(
+        "/api/digests", json=_post_body(use_demo_inputs=True)
+    )
+    assert response.status_code == 422
+    assert "demo flag" in response.json()["detail"]
+
+
+def test_post_demo_inputs_rejects_upload_combo(client):
+    upload = client.post(
+        "/api/uploads", files={"file": ("soc2.md", b"# SOC 2")}
+    )
+    response = client.post(
+        "/api/digests",
+        json=_post_body(
+            demo=True,
+            use_demo_inputs=True,
+            soc2_upload_id=upload.json()["upload_id"],
+        ),
+    )
+    assert response.status_code == 422
+    assert "not both" in response.json()["detail"]
+
+
+def test_post_speakers_without_interview_is_422(client, monkeypatch):
+    started = threading.Event()
+
+    def fake_run_digest(**kwargs):
+        started.set()
+
+    monkeypatch.setattr(api, "run_digest", fake_run_digest)
+    body = _post_body(
+        speaker_names=["Diligence Lead", "Dana Reyes (CTO)"],
+        target_speaker="Dana Reyes (CTO)",
+    )
+    response = client.post("/api/digests", json=body)
+    assert response.status_code == 422
+    assert "require an interview" in response.json()["detail"]
+    assert not started.is_set()
+    upload = client.post(
+        "/api/uploads",
+        files={"file": ("iv.wav", b"RIFF\x24\x00\x00\x00WAVEfmt ")},
+    )
+    body["interview_upload_id"] = upload.json()["upload_id"]
+    assert client.post("/api/digests", json=body).status_code == 202
+    assert started.wait(5)
+
+
+def test_app_js_sends_demo_inputs_flag():
+    web_app = (
+        Path(api.__file__).resolve().parents[3] / "web" / "app.js"
+    )
+    source = web_app.read_text(encoding="utf-8")
+    assert "demoAttachments" in source
+    assert re.search(r"body\.use_demo_inputs = true", source)
+    assert "renderDemoChips" in source
+
+
 def test_sse_streams_ordered_events_and_done(client, api_env):
     run_dir = _run_dir(api_env)
     _write_trace(

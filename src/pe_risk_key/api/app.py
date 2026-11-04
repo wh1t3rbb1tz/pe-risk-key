@@ -47,6 +47,13 @@ RUNS_DIR = resolve_runs_dir()
 UPLOAD_DIR = ROOT / ".uploads"
 WEB_DIR = ROOT / "web"
 
+# Server-known demo fixtures for use_demo_inputs. Clients never send
+# paths; the flag resolves to these files, demo flag only.
+DEMO_SOC2_PATH = ROOT / "fixtures" / "documents" / "brightwater_soc2_type2.md"
+DEMO_INTERVIEW_PATH = (
+    ROOT / "fixtures" / "interviews" / "brightwater_cto_interview.wav"
+)
+
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 ALLOWED_UPLOAD_SUFFIXES = frozenset({".pdf", ".md", ".txt", ".wav", ".m4a"})
 UPLOAD_AUDIO_SUFFIXES = frozenset({".wav", ".m4a"})
@@ -72,6 +79,7 @@ class DigestRequest(BaseModel):
     target_speaker: str | None = None
     as_of: date | None = None
     demo: bool = False
+    use_demo_inputs: bool = False
 
 
 _DOMAIN_LABEL_RE = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
@@ -344,15 +352,61 @@ def create_digest(body: DigestRequest) -> dict[str, str]:
         "aliases": body.aliases,
         "industry": body.industry,
     }
-    soc2_path = _upload_path(body.soc2_upload_id)
-    if soc2_path is not None:
-        kwargs["soc2_path"] = soc2_path
-    interview_path = _upload_path(body.interview_upload_id)
-    if interview_path is not None:
-        kwargs["interview_path"] = interview_path
+    if body.use_demo_inputs:
+        if not body.demo:
+            raise HTTPException(
+                status_code=422,
+                detail="use_demo_inputs requires the demo flag.",
+            )
+        if (
+            body.soc2_upload_id is not None
+            or body.interview_upload_id is not None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Pass either use_demo_inputs or upload ids, not both."
+                ),
+            )
+        missing = [
+            path
+            for path in (DEMO_SOC2_PATH, DEMO_INTERVIEW_PATH)
+            if not path.exists()
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Demo fixture missing on server: "
+                    f"{missing[0].name}."
+                ),
+            )
+        kwargs["soc2_path"] = DEMO_SOC2_PATH
+        kwargs["interview_path"] = DEMO_INTERVIEW_PATH
         kwargs["speaker_names"] = body.speaker_names
         kwargs["target_speakers"] = (
             [body.target_speaker] if body.target_speaker else []
+        )
+    else:
+        soc2_path = _upload_path(body.soc2_upload_id)
+        if soc2_path is not None:
+            kwargs["soc2_path"] = soc2_path
+        interview_path = _upload_path(body.interview_upload_id)
+        if interview_path is not None:
+            kwargs["interview_path"] = interview_path
+            kwargs["speaker_names"] = body.speaker_names
+            kwargs["target_speakers"] = (
+                [body.target_speaker] if body.target_speaker else []
+            )
+    if "interview_path" not in kwargs and (
+        body.speaker_names or (body.target_speaker or "").strip()
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "speaker_names and target_speaker require an interview: "
+                "upload interview audio or load the demo target."
+            ),
         )
     if body.as_of is not None:
         kwargs["as_of"] = body.as_of
@@ -678,10 +732,8 @@ def demo_inputs() -> dict[str, Any]:
     Fixture files are staged as uploads so the returned ids can be
     submitted directly to POST /api/digests.
     """
-    soc2_src = ROOT / "fixtures" / "documents" / "brightwater_soc2_type2.md"
-    interview_src = (
-        ROOT / "fixtures" / "interviews" / "brightwater_cto_interview.wav"
-    )
+    soc2_src = DEMO_SOC2_PATH
+    interview_src = DEMO_INTERVIEW_PATH
     fixture_target = json.loads(
         (
             ROOT / "fixtures" / "outside_in" / "brightwaterfleet.example.json"

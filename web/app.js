@@ -389,6 +389,38 @@ function closeDrawer() {
   $("drawer").hidden = true;
 }
 
+let demoAttachments = { soc2: null, interview: null };
+
+function demoLabel(key) {
+  return key === "soc2" ? "SOC 2" : "Interview";
+}
+
+function renderDemoChips() {
+  const box = $("demo-chips");
+  box.replaceChildren();
+  let count = 0;
+  for (const key of ["soc2", "interview"]) {
+    const attached = demoAttachments[key];
+    if (!attached) continue;
+    count += 1;
+    const chip = el(
+      "span",
+      "chip demo-chip",
+      demoLabel(key) + ": " + (attached.filename || attached.path || key) + " [demo] "
+    );
+    const remove = el("button", "chip-remove", "remove");
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Remove demo " + demoLabel(key));
+    remove.addEventListener("click", () => {
+      demoAttachments[key] = null;
+      renderDemoChips();
+    });
+    chip.appendChild(remove);
+    box.appendChild(chip);
+  }
+  box.hidden = count === 0;
+}
+
 async function loadDemo() {
   const demo = await api("/api/demo-inputs");
   $("f-domain").value = demo.domain || "";
@@ -399,13 +431,15 @@ async function loadDemo() {
   $("f-speakers").value = (demo.speaker_names || []).join(", ");
   $("f-target").value = demo.target_speaker || "";
   $("f-asof").value = demo.as_of || "";
-  const hints = $("demo-hints");
-  hints.textContent =
-    "Demo files:\n" +
-    (demo.soc2 ? demo.soc2.path : "") +
-    "\n" +
-    (demo.interview ? demo.interview.path : "");
-  hints.hidden = false;
+  $("f-demo").checked = true;
+  updateLiveNote();
+  $("f-soc2").value = "";
+  $("f-interview").value = "";
+  demoAttachments = {
+    soc2: demo.soc2 || null,
+    interview: demo.interview || null,
+  };
+  renderDemoChips();
 }
 
 async function uploadFile(input) {
@@ -446,12 +480,22 @@ async function submitDigest(event) {
     if ($("f-asof").value) body.as_of = $("f-asof").value;
     if (soc2) body.soc2_upload_id = soc2.upload_id;
     if (interview) body.interview_upload_id = interview.upload_id;
+    if (demoAttachments.soc2 && demoAttachments.interview && !soc2 && !interview) {
+      body.use_demo_inputs = true;
+    } else {
+      if (!soc2 && demoAttachments.soc2)
+        body.soc2_upload_id = demoAttachments.soc2.upload_id;
+      if (!interview && demoAttachments.interview)
+        body.interview_upload_id = demoAttachments.interview.upload_id;
+    }
     const posted = await api("/api/digests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     closeDrawer();
+    demoAttachments = { soc2: null, interview: null };
+    renderDemoChips();
     await loadRuns();
     openRunLive(posted.digest_id);
   } catch (err) {
@@ -1702,6 +1746,18 @@ function boot() {
   if (PRESENT) document.body.classList.add("present");
   $("new-digest-btn").addEventListener("click", openDrawer);
   $("drawer-cancel").addEventListener("click", closeDrawer);
+  $("f-soc2").addEventListener("change", () => {
+    if ($("f-soc2").files && $("f-soc2").files.length) {
+      demoAttachments.soc2 = null;
+      renderDemoChips();
+    }
+  });
+  $("f-interview").addEventListener("change", () => {
+    if ($("f-interview").files && $("f-interview").files.length) {
+      demoAttachments.interview = null;
+      renderDemoChips();
+    }
+  });
   $("load-demo-btn").addEventListener("click", () => {
     loadDemo().catch((err) => {
       const error = $("form-error");

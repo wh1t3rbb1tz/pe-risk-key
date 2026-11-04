@@ -1,0 +1,108 @@
+{
+  "evidence": [
+    {
+      "evidence_id": "E-001",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "_dmarc.brightwaterfleet.example TXT",
+      "excerpt": "record: v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example ; policy: none, pct: 100, rua: true"
+    },
+    {
+      "evidence_id": "E-002",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "brightwaterfleet.example TXT",
+      "excerpt": "record: v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all ; qualifier: ~all, lookup_count: 2"
+    },
+    {
+      "evidence_id": "E-003",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_dnssec",
+      "locator": "brightwaterfleet.example DS",
+      "excerpt": "queried_name: brightwaterfleet.example, record_type: DS, enabled: false"
+    },
+    {
+      "evidence_id": "E-004",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "vpn.brightwaterfleet.example",
+      "excerpt": "hostname: vpn.brightwaterfleet.example, pattern: vpn, first_seen: 2023-02-11, last_seen: 2026-09-30; risky_hostnames_count: 4"
+    },
+    {
+      "evidence_id": "E-005",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "jenkins-old.brightwaterfleet.example",
+      "excerpt": "hostname: jenkins-old.brightwaterfleet.example, pattern: jenkins|old, first_seen: 2021-06-03, last_seen: 2026-08-14"
+    },
+    {
+      "evidence_id": "E-006",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "staging-api.brightwaterfleet.example",
+      "excerpt": "hostname: staging-api.brightwaterfleet.example, pattern: staging, first_seen: 2024-01-20, last_seen: 2026-10-01"
+    },
+    {
+      "evidence_id": "E-007",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "legacy-portal.brightwaterfleet.example",
+      "excerpt": "hostname: legacy-portal.brightwaterfleet.example, pattern: legacy, first_seen: 2019-11-05, last_seen: 2026-07-22"
+    },
+    {
+      "evidence_id": "E-008",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+      "excerpt": "unique_hostnames: 47"
+    },
+    {
+      "evidence_id": "E-009",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "tls_support: TLSv1.0: true, TLSv1.1: true, TLSv1.2: true, TLSv1.3: not_tested; tls_versions: [TLSv1.0, TLSv1.1, TLSv1.2]"
+    },
+    {
+      "evidence_id": "E-010",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://brightwaterfleet.example/",
+      "excerpt": "headers: strict-transport-security: null, content-security-policy: null, x-frame-options: SAMEORIGIN, server: nginx"
+    },
+    {
+      "evidence_id": "E-011",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "headers: strict-transport-security: null, content-security-policy: null, x-frame-options: null"
+    },
+    {
+      "evidence_id": "E-012",
+      "source_type": "outside_in",
+      "collection_method": "offline_lookup",
+      "collector": "match_known_exploited",
+      "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+      "excerpt": "CVE-PLACEHOLDER-0001, vendor: ExampleGate, product: ExampleGate SSL-VPN, version: 7.0.11, match_level: product, match_tier: appliance_exposed, note: KEV lists products, not affected versions; version not verified."
+    },
+    {
+      "evidence_id": "E-013",
+      "source_type": "public_record",
+      "collection_method": "search_grounding",
+      "collector": "search_public_incidents",
+      "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+      "excerpt": "type: state_ag_breach_notice, date: 2025-08-14, summary: Notice filed for unauthorized access to a customer support system; approx. 3,100 individuals notified. disclosed_within_months: 14, entity_match: exact"
+    }
+  ]
+}

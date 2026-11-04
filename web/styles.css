@@ -153,6 +153,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 .chip.done { color: var(--text); }
 .chip.error { color: var(--critical); border-color: var(--critical); }
 .chip .dur { color: var(--muted); }
+.chip-remove {
+  background: none; border: none; padding: 0 0 0 6px;
+  color: var(--muted); font: inherit; cursor: pointer;
+}
+.chip-remove:hover { color: var(--text); text-decoration: underline; }
 .lane {
   display: flex; justify-content: space-between; gap: 8px;
   font-size: 12px; padding: 5px 0; border-bottom: 1px solid var(--line);

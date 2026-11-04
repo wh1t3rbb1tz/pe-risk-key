@@ -1,0 +1,108 @@
+{
+  "evidence": [
+    {
+      "evidence_id": "E-001",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "_dmarc.brightwaterfleet.example TXT",
+      "excerpt": "DMARC record: v=DMARC1; p=none; rua=mailto:dmarc@brightwaterfleet.example; policy=none, pct=100, rua=true."
+    },
+    {
+      "evidence_id": "E-002",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_email_auth",
+      "locator": "brightwaterfleet.example TXT",
+      "excerpt": "SPF record: v=spf1 include:_spf.mailhost.example include:sendgrid.example ~all; qualifier=~all, lookup_count=2."
+    },
+    {
+      "evidence_id": "E-003",
+      "source_type": "outside_in",
+      "collection_method": "dns_query",
+      "collector": "check_dnssec",
+      "locator": "brightwaterfleet.example DS",
+      "excerpt": "DNSSEC enabled=false for DS query at brightwaterfleet.example."
+    },
+    {
+      "evidence_id": "E-004",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "vpn.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=vpn; first_seen=2023-02-11, last_seen=2026-09-30; risky_hostnames_count=4."
+    },
+    {
+      "evidence_id": "E-005",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "jenkins-old.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=jenkins|old; first_seen=2021-06-03, last_seen=2026-08-14."
+    },
+    {
+      "evidence_id": "E-006",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "staging-api.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=staging; first_seen=2024-01-20, last_seen=2026-10-01."
+    },
+    {
+      "evidence_id": "E-007",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "legacy-portal.brightwaterfleet.example",
+      "excerpt": "Risky hostname pattern=legacy; first_seen=2019-11-05, last_seen=2026-07-22."
+    },
+    {
+      "evidence_id": "E-008",
+      "source_type": "outside_in",
+      "collection_method": "ct_log_query",
+      "collector": "enumerate_ct_subdomains",
+      "locator": "https://crt.sh/?q=%25.brightwaterfleet.example&output=json",
+      "excerpt": "CT query returned unique_hostnames=47, exceeding the rule threshold of 40 for a 201-1000 employee company."
+    },
+    {
+      "evidence_id": "E-009",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "tls_support TLSv1.0=true, TLSv1.1=true, TLSv1.2=true; tls_versions=[TLSv1.0, TLSv1.1, TLSv1.2]."
+    },
+    {
+      "evidence_id": "E-010",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://brightwaterfleet.example/",
+      "excerpt": "Security headers show strict-transport-security=null on the apex host."
+    },
+    {
+      "evidence_id": "E-011",
+      "source_type": "outside_in",
+      "collection_method": "single_https_get",
+      "collector": "check_web_posture",
+      "locator": "https://www.brightwaterfleet.example/",
+      "excerpt": "Security headers show strict-transport-security=null on www host."
+    },
+    {
+      "evidence_id": "E-012",
+      "source_type": "outside_in",
+      "collection_method": "offline_lookup",
+      "collector": "match_known_exploited",
+      "locator": "https://www.brightwaterfleet.example/ (link /examplegate/login)",
+      "excerpt": "KEV match CVE-PLACEHOLDER-0001 for ExampleGate SSL-VPN 7.0.11, match_tier=appliance_exposed, match_level=product; note: KEV lists products, not affected versions; version not verified."
+    },
+    {
+      "evidence_id": "E-013",
+      "source_type": "public_record",
+      "collection_method": "search_grounding",
+      "collector": "search_public_incidents",
+      "locator": "https://ag.state.example/breach-notices/2025-0814-brightwater",
+      "excerpt": "State AG breach notice dated 2025-08-14: unauthorized access to a customer support system; approx. 3,100 individuals notified. Entity match exact; disclosed_within_months=14."
+    }
+  ]
+}
